@@ -1,130 +1,227 @@
-# P2P Chess Prototype
+# P2P Chess — Prototype
 
-Peer-to-peer chess web application with WebRTC primary channel, WebSocket fallback, CRDT state synchronization, and Stockfish analysis.
+Peer-to-peer шахматное веб-приложение с WebRTC (P2P) как основным каналом, WebSocket fallback, синхронизацией состояния через Yjs CRDT, и анализом Stockfish.
 
-## Architecture
+Спроектировано как прототип для будущего Telegram Mini App.
 
-- **Frontend**: React + TypeScript + Vite + chess.js + react-chessboard + Yjs (CRDT)
-- **Backend**: Go + skyterra/y-crdt + CorentinGS/chess + pion/webrtc + PostgreSQL
-- **Sync**: Yjs CRDT with y-webrtc (P2P primary) and y-websocket (server fallback)
-- **Analysis**: Stockfish via UCI protocol
+## Архитектура
 
-## Prerequisites
+| Слой | Технологии |
+|------|-----------|
+| **Frontend** | React 19, TypeScript, Vite 7, chess.js, react-chessboard v5, Yjs |
+| **CRDT-синхронизация** | Yjs, y-webrtc (P2P), y-websocket (WS fallback) |
+| **Backend** | Go 1.24, gorilla/websocket, skyterra/y-crdt |
+| **Шахматная логика** | chess.js (клиент), CorentinGS/chess/v2 (сервер) |
+| **Анализ** | Stockfish через UCI-протокол |
+| **Хранение** | PostgreSQL 16, jackc/pgx/v5 |
+| **Инфра** | Docker, Docker Compose, Nginx |
+
+```
+Клиент A ◄──── WebRTC / WebSocket ────► Клиент B
+                       │
+                 Go Backend
+            ┌──────────┼──────────┐
+            │          │          │
+      Валидация   PostgreSQL   Stockfish
+```
+
+> Подробная архитектура, диаграммы потоков, схема БД: [ARCHITECTURE.md](ARCHITECTURE.md)
+
+## Требования
 
 - **Node.js** >= 18
-- **Go** >= 1.23 (`brew install go`)
-- **PostgreSQL** 16+ (via Docker or local)
-- **Stockfish** (optional, for analysis: `brew install stockfish`)
-- **Docker** + **Docker Compose** (for PostgreSQL)
+- **Go** >= 1.24
+- **Docker** + **Docker Compose**
+- **Stockfish** (опционально, для анализа: `brew install stockfish`)
 
-## Quick Start
+## Быстрый старт
 
-### Docker (full stack, one command)
+### Docker — полный стек одной командой
 
 ```bash
 docker compose up -d
-# Open http://localhost:3000
 ```
 
-By default runs in **hybrid** mode (P2P primary, WebSocket fallback).
+Откройте **http://localhost:3000**
 
-Switch connection mode:
+По умолчанию — режим **hybrid** (P2P с WebSocket fallback).
+
+### Выбор режима подключения
 
 ```bash
-# WebSocket only
+# Гибридный (P2P → WS fallback) — по умолчанию
+docker compose up -d
+
+# Только WebSocket (весь трафик через сервер)
 CONNECTION_MODE=websocket docker compose up -d
 
-# P2P only
+# Только P2P (сервер только для signaling)
 CONNECTION_MODE=p2p docker compose up -d
 ```
 
-### Local Development
+| Режим | Транспорт | Задержка | Сервер нужен | Надёжность |
+|-------|-----------|----------|--------------|------------|
+| `hybrid` | WebRTC + WS fallback | <50ms / ~150ms | Signaling + fallback | Максимальная |
+| `p2p` | WebRTC only | <50ms | Только signaling | Зависит от сети |
+| `websocket` | WebSocket only | ~100-200ms | Всегда | Максимальная |
+
+### Локальная разработка (без Docker для frontend/backend)
 
 ```bash
-# Terminal 1: PostgreSQL
+# Терминал 1: PostgreSQL
 docker compose up -d postgres
 
-# Terminal 2: Backend
-cd backend && go mod tidy && go run cmd/server/main.go
+# Терминал 2: Go-бэкенд
+cd backend
+go mod tidy
+go run cmd/server/main.go
 
-# Terminal 3: Frontend (Vite dev server)
-cd frontend && npm install && npm run dev
-# Open http://localhost:5173
+# Терминал 3: Фронтенд (Vite dev server с proxy на :8080)
+cd frontend
+npm install
+npm run dev
 ```
 
-### Play
+Откройте **http://localhost:5173**
 
-1. Open the app in your browser
-2. Click **Create New Game**
-3. Copy the link and open it in another browser tab/window
-4. Play chess!
+Переключение режима в dev:
+```bash
+VITE_CONNECTION_MODE=websocket npm run dev
+VITE_CONNECTION_MODE=p2p npm run dev
+```
 
-## How It Works
+## Как играть
 
-### Connection Flow
+1. Откройте приложение в браузере
+2. Нажмите **Create New Game**
+3. Скопируйте ссылку и откройте во втором окне браузера (или отправьте другу)
+4. Играйте!
 
-1. Both players connect to the same room via URL
-2. **y-webrtc** attempts P2P connection (primary channel)
-3. If P2P fails after 10s, **y-websocket** activates as fallback
-4. When P2P is restored, WebSocket disconnects to save server resources
+Первый подключившийся — белые, второй — чёрные.
 
-### Data Sync (Yjs CRDT)
+## API-эндпоинты
 
-- Game state (FEN, PGN, moves, players) stored in `Y.Map("game")`
-- Updates propagate via active provider (WebRTC or WebSocket)
-- CRDT ensures consistency even with out-of-order or duplicate updates
-- Server validates moves and persists state to PostgreSQL
+| Endpoint | Протокол | Описание |
+|----------|----------|----------|
+| `/ws/{roomId}` | WebSocket | y-websocket — двусторонняя Yjs-синхронизация |
+| `/signaling` | WebSocket | WebRTC signaling — relay ICE/SDP для y-webrtc |
+| `/api/room/{id}` | GET | Информация о комнате/игре |
+| `/api/game/{id}/analysis` | GET | Результаты Stockfish-анализа партии |
+| `/api/evaluate?fen=...&depth=12` | GET | Быстрая оценка позиции Stockfish (real-time) |
+| `/health` | GET | Health check: rooms, DB, Stockfish |
 
-### Server Validation Pipeline
-
-1. Receive Yjs update via WebSocket
-2. Apply update to server-side Y.Doc (skyterra/y-crdt)
-3. Extract game state from Y.Map
-4. Validate moves using CorentinGS/chess
-5. Save state to PostgreSQL
-6. Trigger Stockfish analysis (async)
-
-### Stockfish Analysis
-
-- **During game**: quick analysis (depth 15) for eval bar
-- **After game**: deep analysis (depth 20-25) with move classification
-- Classifications: brilliant, great, best, good, inaccuracy, mistake, blunder
-- Results available via `GET /api/game/{id}/analysis`
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/ws/{roomId}` | WS | y-websocket protocol (Yjs sync) |
-| `/signaling` | WS | WebRTC signaling (y-webrtc) |
-| `/api/room/{id}` | GET | Get room/game info |
-| `/api/game/{id}/analysis` | GET | Get Stockfish analysis |
-| `/health` | GET | Health check |
-
-## Project Structure
+## Структура проекта
 
 ```
 p2p_poc/
-  frontend/           # React + TypeScript + Vite
-    src/
-      components/     # UI components
-      hooks/          # React hooks (chess game, Yjs sync)
-      lib/            # Core logic (game state, connection manager)
-  backend/            # Go
-    cmd/server/       # Entry point
-    internal/
-      room/           # Room management
-      ws/             # WebSocket + y-websocket protocol
-      signaling/      # WebRTC signaling
-      chess/          # Move validation
-      analysis/       # Stockfish UCI client
-      storage/        # PostgreSQL persistence
-  docker-compose.yml  # PostgreSQL
+├── ARCHITECTURE.md              # Подробная архитектура
+├── README.md                    # ← этот файл
+├── docker-compose.yml           # PostgreSQL + Backend + Frontend
+│
+├── frontend/                    # React + TypeScript + Vite
+│   ├── Dockerfile               # Multi-stage: Node build → Nginx
+│   ├── nginx.conf               # Proxy /ws, /signaling, /api → backend
+│   ├── docker-entrypoint.sh     # ENV → /config.js (runtime injection)
+│   ├── src/
+│   │   ├── main.tsx             # React entry
+│   │   ├── App.tsx              # Router: / → Home, /room/:id → GameRoom
+│   │   │
+│   │   ├── lib/
+│   │   │   ├── gameState.ts     # Y.Doc ↔ GameState (CRDT helpers)
+│   │   │   ├── connectionManager.ts  # State machine: P2P ⇄ WS
+│   │   │   ├── config.ts        # Runtime config (Docker/Vite/auto-detect)
+│   │   │   └── evaluation.ts    # Stockfish API + material fallback
+│   │   │
+│   │   ├── hooks/
+│   │   │   ├── useYjsSync.ts    # Y.Doc + ConnectionManager init
+│   │   │   └── useChessGame.ts  # chess.js ↔ Y.Doc sync, move replay
+│   │   │
+│   │   └── components/
+│   │       ├── Home.tsx          # Лобби: создание/вход
+│   │       ├── GameRoom.tsx      # Главный экран (оркестратор)
+│   │       ├── ChessBoard.tsx    # Доска (react-chessboard v5)
+│   │       ├── ConnectionStatus.tsx  # P2P/WS/Disconnected
+│   │       ├── GameStatus.tsx    # Статус, список ходов
+│   │       ├── EvalBar.tsx       # Полоска оценки позиции
+│   │       └── GameAnalysis.tsx  # Анализ после окончания
+│   │
+│   └── package.json
+│
+└── backend/                     # Go 1.24
+    ├── Dockerfile               # Multi-stage: Go build + Debian + Stockfish
+    ├── go.mod
+    ├── cmd/server/
+    │   └── main.go              # HTTP-сервер, маршрутизация
+    │
+    └── internal/
+        ├── room/
+        │   ├── manager.go       # Lifecycle комнат
+        │   └── room.go          # Room: Y.Doc + clients + broadcast
+        ├── ws/
+        │   ├── handler.go       # y-websocket handler
+        │   └── yjs_sync.go      # Yjs binary protocol
+        ├── signaling/
+        │   └── handler.go       # WebRTC signaling relay
+        ├── chess/
+        │   └── validator.go     # Серверная валидация (UCI replay)
+        ├── analysis/
+        │   ├── stockfish.go     # UCI-клиент (quick + deep analysis)
+        │   └── classifier.go    # Классификация: brilliant → blunder
+        └── storage/
+            ├── models.go        # Game, YjsSnapshot, MoveAnalysis
+            ├── migrations.go    # DDL: CREATE TABLE
+            └── postgres.go      # CRUD
 ```
 
-## Future: Telegram Mini App
+## Переменные окружения
 
-This app is designed to become a Telegram Mini App:
-- Responsive mobile-first design
-- No authentication required (will use Telegram user data)
-- URL-based room sharing (compatible with Telegram deep links)
+### Backend
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `PORT` | `8080` | Порт HTTP-сервера |
+| `DATABASE_URL` | `postgres://...@localhost:5432/p2p_chess` | PostgreSQL URL |
+| `STOCKFISH_PATH` | `stockfish` | Путь к Stockfish binary |
+| `FRONTEND_URL` | `http://localhost:3000` | Origin для CORS |
+
+### Frontend (Docker)
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `CONNECTION_MODE` | `hybrid` | `p2p` / `websocket` / `hybrid` |
+| `WS_SERVER_URL` | auto-detect | WebSocket URL бэкенда |
+| `SIGNALING_SERVERS` | auto-detect | JSON-массив signaling URL |
+| `API_BASE_URL` | auto-detect | HTTP URL для REST API |
+
+### Frontend (Vite dev)
+
+| Переменная | По умолчанию | Описание |
+|-----------|-------------|----------|
+| `VITE_CONNECTION_MODE` | `hybrid` | Режим подключения |
+| `VITE_WS_SERVER_URL` | auto-detect | WebSocket URL |
+| `VITE_SIGNALING_SERVERS` | auto-detect | Signaling URL |
+| `VITE_API_BASE_URL` | auto-detect | API URL |
+
+## Ключевые особенности
+
+- **CRDT-синхронизация** — Yjs обеспечивает eventual consistency без центрального сервера
+- **Бесконфликтная рассадка** — каждый клиент пишет в свой ключ Y.Map, цвет вычисляется детерминированно
+- **Full move replay** — chess.js воспроизводит все ходы с начала, сохраняя полную PGN-историю
+- **Evaluation bar** — real-time оценка через Stockfish API, fallback на подсчёт материала
+- **Post-game analysis** — глубокий анализ (depth 20) с классификацией ходов (brilliant → blunder)
+- **Серверная валидация** — Go-бэкенд проверяет легальность каждого хода через CorentinGS/chess
+- **3 режима подключения** — P2P, WebSocket, Hybrid — один Docker-образ
+
+## Будущее: Telegram Mini App
+
+Приложение спроектировано для миграции в Telegram Mini App:
+
+| Текущее | Telegram Mini App |
+|---------|-------------------|
+| `nanoid()` для playerId | `Telegram.WebApp.initDataUnsafe.user.id` |
+| Ручной ввод имени | Telegram user name |
+| URL-sharing | Telegram deep links / inline buttons |
+| Нет авторизации | `initData` validation |
+| Веб-браузер | Telegram WebView |
+
+Архитектура не требует изменений — только клиентская адаптация.
