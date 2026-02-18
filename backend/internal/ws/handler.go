@@ -3,10 +3,13 @@ package ws
 import (
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	ycrdt "github.com/skyterra/y-crdt"
+	"golang.org/x/time/rate"
 
 	"github.com/ruchess/p2p_poc/backend/internal/room"
 	"github.com/ruchess/p2p_poc/backend/internal/storage"
@@ -20,9 +23,12 @@ var upgrader = websocket.Upgrader{
 
 // Handler holds dependencies for WebSocket endpoints.
 type Handler struct {
-	RoomManager *room.Manager
-	Store       *storage.PostgresStore // may be nil in dev mode
-	OnUpdate    func(roomID uuid.UUID, doc *ycrdt.Doc) // callback for validation/analysis
+	RoomManager      *room.Manager
+	Store            *storage.PostgresStore // may be nil in dev mode
+	OnUpdate         func(roomID uuid.UUID, doc *ycrdt.Doc)
+	WSRateLimitMPS   float64
+	WSRateLimitBurst int
+	RateLimitEnabled bool
 }
 
 // HandleYjsWS handles the y-websocket protocol for a room.
@@ -39,6 +45,11 @@ func (h *Handler) HandleYjsWS(w http.ResponseWriter, r *http.Request) {
 
 	if roomIDStr == "" {
 		http.Error(w, "room parameter required", http.StatusBadRequest)
+		return
+	}
+
+	if len(roomIDStr) > 50 {
+		http.Error(w, "room id too long", http.StatusBadRequest)
 		return
 	}
 
@@ -101,6 +112,14 @@ func (h *Handler) readMessages(client *room.Client, gameRoom *room.Room, roomID 
 		h.RoomManager.RemoveRoomIfEmpty(roomID)
 	}()
 
+	maxMsgSize := int64(getMaxMessageSize())
+	client.Conn.SetReadLimit(maxMsgSize)
+
+	var limiter *rate.Limiter
+	if h.RateLimitEnabled && h.WSRateLimitMPS > 0 {
+		limiter = rate.NewLimiter(rate.Limit(h.WSRateLimitMPS), h.WSRateLimitBurst)
+	}
+
 	for {
 		messageType, data, err := client.Conn.ReadMessage()
 		if err != nil {
@@ -114,8 +133,22 @@ func (h *Handler) readMessages(client *room.Client, gameRoom *room.Room, roomID 
 			continue
 		}
 
+		if limiter != nil && !limiter.Allow() {
+			log.Printf("[WS] Rate limit exceeded for client in room %s", roomID)
+			continue
+		}
+
 		h.handleBinaryMessage(client, gameRoom, roomID, data)
 	}
+}
+
+func getMaxMessageSize() int {
+	if v := os.Getenv("WS_MAX_MESSAGE_SIZE"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 65536
 }
 
 func (h *Handler) handleBinaryMessage(client *room.Client, gameRoom *room.Room, roomID uuid.UUID, data []byte) {

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { config } from '../lib/config';
 
 interface MoveAnalysisData {
   moveNumber: number;
@@ -40,7 +41,7 @@ const classificationSymbols: Record<string, string> = {
   blunder: '??',
 };
 
-export function GameAnalysis({ gameId, apiBaseUrl = 'http://localhost:8080' }: GameAnalysisProps) {
+export function GameAnalysis({ gameId, apiBaseUrl = config.apiBaseUrl }: GameAnalysisProps) {
   const [analysis, setAnalysis] = useState<MoveAnalysisData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

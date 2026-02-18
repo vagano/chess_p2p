@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
 import { WebsocketProvider } from 'y-websocket';
 import type { ConnectionMode } from './config';
+import { getInitData } from './telegram';
 
 export type ConnectionState =
   | 'P2P_CONNECTING'
@@ -51,6 +52,14 @@ export class ConnectionManager {
     this.p2pRetryInterval = options.p2pRetryInterval ?? 30000;
     this.onStateChange = options.onStateChange;
     this.onPeerCountChange = options.onPeerCountChange;
+  }
+
+  /** Append initData to a WS URL for server-side auth */
+  private authWsUrl(base: string): string {
+    const initData = getInitData();
+    if (!initData) return base;
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}initData=${encodeURIComponent(initData)}`;
   }
 
   get currentState(): ConnectionState {
@@ -104,7 +113,7 @@ export class ConnectionManager {
     return new Promise((resolve) => {
       if (!this.wsProvider) {
         this.wsProvider = new WebsocketProvider(
-          this.wsServerUrl,
+          this.authWsUrl(this.wsServerUrl),
           this.roomId,
           this.doc,
           { connect: false }
@@ -187,7 +196,7 @@ export class ConnectionManager {
     this.setState('WS_CONNECTING');
 
     this.wsProvider = new WebsocketProvider(
-      this.wsServerUrl,
+      this.authWsUrl(this.wsServerUrl),
       this.roomId,
       this.doc,
     );
@@ -270,7 +279,7 @@ export class ConnectionManager {
 
     if (!this.wsProvider) {
       this.wsProvider = new WebsocketProvider(
-        this.wsServerUrl,
+        this.authWsUrl(this.wsServerUrl),
         this.roomId,
         this.doc,
         { connect: false }

@@ -16,6 +16,16 @@ import {
 } from '../lib/gameState';
 import { config } from '../lib/config';
 import { fetchEvaluation, type EvalResult } from '../lib/evaluation';
+import {
+  isTelegram,
+  getTelegramUser,
+  hapticImpact,
+  hapticNotification,
+  showBackButton,
+  hideBackButton,
+  showMainButton,
+  hideMainButton,
+} from '../lib/telegram';
 
 export function GameRoom() {
   const { roomId } = useParams<{ roomId: string }>();
@@ -29,8 +39,14 @@ export function GameRoom() {
   const { doc, connectionState, isP2P, syncWithServer, peerCount } =
     useYjsSync({ roomId });
 
-  const [playerId] = useState(() => nanoid(8));
-  const [playerName] = useState(() => `Player_${playerId.substring(0, 4)}`);
+  const [playerId] = useState(() => {
+    const tgUser = getTelegramUser();
+    return tgUser ? tgUser.id.toString() : nanoid(8);
+  });
+  const [playerName] = useState(() => {
+    const tgUser = getTelegramUser();
+    return tgUser ? tgUser.first_name : `Player_${playerId.substring(0, 4)}`;
+  });
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
   const [boardWidth, setBoardWidth] = useState(480);
   const evalAbortRef = useRef<AbortController | null>(null);
@@ -40,7 +56,12 @@ export function GameRoom() {
 
   // Register this player in the shared "players" map (unique key = no CRDT conflicts)
   useEffect(() => {
-    registerPlayer(doc, playerId, playerName);
+    const tgUser = getTelegramUser();
+    registerPlayer(doc, playerId, playerName, tgUser ? {
+      telegramId: tgUser.id,
+      username: tgUser.username,
+      photoUrl: tgUser.photo_url,
+    } : undefined);
   }, [doc, playerId, playerName]);
 
   // Observe the "players" map and derive color whenever it changes
@@ -61,19 +82,35 @@ export function GameRoom() {
     return () => playersMap.unobserveDeep(recalc);
   }, [doc, playerId]);
 
-  // Responsive board size
+  // Responsive board size — account for eval bar (28px) + gaps
   useEffect(() => {
     const updateSize = () => {
-      const w = Math.min(window.innerWidth - 80, 560);
-      setBoardWidth(Math.max(280, w));
+      const isMobile = window.innerWidth <= 600;
+      const w = isMobile
+        ? window.innerWidth - 48       // eval bar (28) + padding (20)
+        : Math.min(window.innerWidth - 320, 560);
+      setBoardWidth(Math.max(240, w));
     };
     updateSize();
     window.addEventListener('resize', updateSize);
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  const { game, gameState, position, isMyTurn, makeMove, isGameOver, lastMove, possibleMoves } =
+  const { game, gameState, position, isMyTurn, makeMove: rawMakeMove, isGameOver, lastMove, possibleMoves } =
     useChessGame({ doc, playerColor });
+
+  const makeMove = useCallback(
+    (...args: Parameters<typeof rawMakeMove>) => {
+      const result = rawMakeMove(...args);
+      if (result) {
+        hapticImpact('light');
+      } else if (isTelegram()) {
+        hapticNotification('error');
+      }
+      return result;
+    },
+    [rawMakeMove]
+  );
 
   // Fetch position evaluation after each move
   useEffect(() => {
@@ -108,26 +145,63 @@ export function GameRoom() {
     }
   }, [gameState.moves.length, isP2P, syncWithServer]);
 
-  // Sync on game over
+  // Sync on game over + haptic
   useEffect(() => {
     if (isGameOver) {
       syncWithServer();
+      hapticNotification('success');
     }
   }, [isGameOver, syncWithServer]);
 
-  const handleCopyLink = useCallback(() => {
+  // Telegram BackButton — navigate home
+  useEffect(() => {
+    if (!isTelegram()) return;
+    const goBack = () => navigate('/');
+    showBackButton(goBack);
+    return () => hideBackButton();
+  }, [navigate]);
+
+  // Telegram MainButton — "Invite Friend" while waiting
+  useEffect(() => {
+    if (!isTelegram()) return;
+    if (gameState.status === 'waiting' && roomId) {
+      const botUsername = import.meta.env.VITE_TG_BOT_USERNAME || '';
+      const appName = import.meta.env.VITE_TG_APP_NAME || '';
+      showMainButton('Invite Friend', () => {
+        if (botUsername && appName) {
+          const link = `https://t.me/${botUsername}/${appName}?startapp=${roomId}`;
+          window.Telegram?.WebApp?.openTelegramLink(link);
+        }
+      });
+    } else {
+      hideMainButton();
+    }
+    return () => hideMainButton();
+  }, [gameState.status, roomId]);
+
+  const handleShareRoom = useCallback(() => {
+    if (isTelegram()) {
+      const botUsername = import.meta.env.VITE_TG_BOT_USERNAME || '';
+      const appName = import.meta.env.VITE_TG_APP_NAME || '';
+      if (botUsername && appName && roomId) {
+        const link = `https://t.me/${botUsername}/${appName}?startapp=${roomId}`;
+        window.Telegram?.WebApp?.openTelegramLink(link);
+        return;
+      }
+    }
     navigator.clipboard.writeText(window.location.href);
-  }, []);
+  }, [roomId]);
 
   return (
     <div
       style={{
         minHeight: '100vh',
-        background: '#f5f5f5',
+        background: 'var(--tg-theme-bg-color, #f5f5f5)',
+        color: 'var(--tg-theme-text-color, #333)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '16px',
+        padding: '12px',
       }}
     >
       {/* Header */}
@@ -138,35 +212,36 @@ export function GameRoom() {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: '16px',
+          marginBottom: '12px',
         }}
       >
-        <h1 style={{ fontSize: '20px', margin: 0, fontWeight: 700 }}>P2P Chess</h1>
+        <h1 style={{ fontSize: '18px', margin: 0, fontWeight: 700 }}>P2P Chess</h1>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <ConnectionStatus state={connectionState} peerCount={peerCount} />
           <button
-            onClick={handleCopyLink}
+            onClick={handleShareRoom}
             style={{
               padding: '8px 16px',
               borderRadius: '20px',
               border: 'none',
-              background: '#1976d2',
-              color: '#fff',
+              background: 'var(--tg-theme-button-color, #1976d2)',
+              color: 'var(--tg-theme-button-text-color, #fff)',
               cursor: 'pointer',
               fontSize: '13px',
               fontWeight: 500,
             }}
           >
-            Copy Link
+            {isTelegram() ? 'Invite' : 'Copy Link'}
           </button>
         </div>
       </div>
 
       {/* Game area */}
       <div
+        className="game-area"
         style={{
           display: 'flex',
-          gap: '16px',
+          gap: '12px',
           alignItems: 'flex-start',
           flexWrap: 'wrap',
           justifyContent: 'center',
@@ -175,7 +250,7 @@ export function GameRoom() {
         }}
       >
         {/* Board + Eval bar */}
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'stretch' }}>
           <EvalBar
             evaluation={evalResult?.scoreCp ?? null}
             isMate={evalResult?.isMate ?? false}
@@ -196,12 +271,12 @@ export function GameRoom() {
 
         {/* Sidebar */}
         <div
+          className="game-sidebar"
           style={{
             width: '250px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '12px',
-            minWidth: '200px',
+            gap: '10px',
           }}
         >
           <GameStatus
@@ -214,24 +289,20 @@ export function GameRoom() {
           {/* Room info */}
           <div
             style={{
-              padding: '12px 16px',
-              background: '#fff',
+              padding: '10px 14px',
+              background: 'var(--tg-theme-secondary-bg-color, #fff)',
               borderRadius: '8px',
               boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
               fontSize: '12px',
-              color: '#888',
+              color: 'var(--tg-theme-hint-color, #888)',
             }}
           >
             <div>Room: <code>{roomId}</code></div>
             <div style={{ marginTop: '4px' }}>
-              Transport: {isP2P ? 'Peer-to-Peer' : connectionState === 'WS_CONNECTED' ? 'WebSocket' : connectionState === 'WS_FALLBACK' ? 'WS Fallback' : 'Connecting...'}
-            </div>
-            <div style={{ marginTop: '2px' }}>
-              Config: {config.connectionMode}
+              Transport: {isP2P ? 'P2P' : connectionState === 'WS_CONNECTED' ? 'WS' : connectionState === 'WS_FALLBACK' ? 'WS Fallback' : '...'}
             </div>
           </div>
 
-          {/* Game analysis (after game over) */}
           {isGameOver && <GameAnalysis gameId={roomId} />}
         </div>
       </div>

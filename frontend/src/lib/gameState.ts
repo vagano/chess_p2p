@@ -104,6 +104,9 @@ export interface SeatEntry {
   id: string;
   name: string;
   joinedAt: number;
+  telegramId?: number;
+  username?: string;
+  photoUrl?: string;
 }
 
 export function getPlayersMap(doc: Y.Doc): Y.Map<unknown> {
@@ -111,11 +114,21 @@ export function getPlayersMap(doc: Y.Doc): Y.Map<unknown> {
 }
 
 /** Each client registers themselves under their own unique key — no write conflicts. */
-export function registerPlayer(doc: Y.Doc, playerId: string, playerName: string): void {
+export function registerPlayer(
+  doc: Y.Doc,
+  playerId: string,
+  playerName: string,
+  extra?: { telegramId?: number; username?: string; photoUrl?: string }
+): void {
   const playersMap = getPlayersMap(doc);
   if (!playersMap.has(playerId)) {
     doc.transact(() => {
-      playersMap.set(playerId, { id: playerId, name: playerName, joinedAt: Date.now() });
+      playersMap.set(playerId, {
+        id: playerId,
+        name: playerName,
+        joinedAt: Date.now(),
+        ...extra,
+      });
     });
   }
 }

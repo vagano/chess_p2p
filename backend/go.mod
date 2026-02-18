@@ -17,8 +17,10 @@ require (
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/stretchr/testify v1.10.0 // indirect
+	github.com/telegram-mini-apps/init-data-golang v1.5.0 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c // indirect
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/time v0.14.0 // indirect
 )

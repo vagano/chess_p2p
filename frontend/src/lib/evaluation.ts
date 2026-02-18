@@ -1,4 +1,5 @@
 import { config } from './config';
+import { getInitData } from './telegram';
 
 /** Result from the evaluation API or local fallback */
 export interface EvalResult {
@@ -64,7 +65,11 @@ export async function fetchEvaluation(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
 
-    const res = await fetch(url, { signal: controller.signal });
+    const headers: Record<string, string> = {};
+    const tgData = getInitData();
+    if (tgData) headers['Authorization'] = `tma ${tgData}`;
+
+    const res = await fetch(url, { signal: controller.signal, headers });
     clearTimeout(timeout);
 
     if (!res.ok) {
