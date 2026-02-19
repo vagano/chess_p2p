@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { config } from '../lib/config';
+import { getInitData } from '../lib/telegram';
 
 interface MoveAnalysisData {
   moveNumber: number;
@@ -49,7 +50,10 @@ export function GameAnalysis({ gameId, apiBaseUrl = config.apiBaseUrl }: GameAna
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
-        const res = await fetch(`${apiBaseUrl}/api/game/${gameId}/analysis`);
+        const headers: Record<string, string> = {};
+        const tgData = getInitData();
+        if (tgData) headers['Authorization'] = `tma ${tgData}`;
+        const res = await fetch(`${apiBaseUrl}/api/game/${gameId}/analysis`, { headers });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
