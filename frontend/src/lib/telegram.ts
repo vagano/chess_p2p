@@ -189,37 +189,39 @@ export function switchInlineQuery(query: string): void {
 
 /**
  * Share a room invite link.
- * Strategy: switchInlineQuery → openTelegramLink/share → clipboard.
+ * In Telegram: shares the t.me deep link (for Telegram users).
+ * In browser: copies the current web URL to clipboard.
  */
 export function shareRoom(roomId: string): void {
   const { tgBotUsername, tgAppName } = config;
   const wa = getWebApp();
 
-  const inviteLink = (tgBotUsername && tgAppName)
-    ? `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`
-    : window.location.href;
-
   if (wa) {
-    // Strategy 1: switchInlineQuery (WebApp 6.7+, doesn't close the app)
-    if (typeof wa.switchInlineQuery === 'function' && tgBotUsername) {
+    const tgLink = (tgBotUsername && tgAppName)
+      ? `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`
+      : null;
+
+    console.log('[shareRoom] TG mode, tgBotUsername:', tgBotUsername, 'tgAppName:', tgAppName, 'link:', tgLink);
+
+    if (tgLink) {
+      // Strategy 1: Telegram share dialog with the deep link
       try {
-        wa.switchInlineQuery(roomId, ['users', 'groups', 'channels']);
+        const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(tgLink)}&text=${encodeURIComponent('♟ Join my chess game!')}`;
+        wa.openTelegramLink(shareUrl);
         return;
       } catch { /* fall through */ }
     }
 
-    // Strategy 2: open Telegram share dialog (closes the Mini App)
-    try {
-      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent('Join my chess game!')}`;
-      wa.openTelegramLink(shareUrl);
-      return;
-    } catch { /* fall through */ }
+    // Fallback: show alert with whatever link we have
+    wa.showAlert(tgLink ?? window.location.href);
+    return;
   }
 
-  // Strategy 3: clipboard (browser / fallback)
-  navigator.clipboard.writeText(inviteLink)
+  // Browser mode: copy the current web URL
+  const webLink = window.location.href;
+  navigator.clipboard.writeText(webLink)
     .then(() => alert('Link copied!'))
-    .catch(() => prompt('Copy this link:', inviteLink));
+    .catch(() => prompt('Copy this link:', webLink));
 }
 
 // --- Theming ---
