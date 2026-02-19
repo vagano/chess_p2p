@@ -43,6 +43,9 @@ services:
     environment:
       # ── Connection mode: "p2p" | "websocket" | "hybrid" ──
       CONNECTION_MODE: "hybrid"
+      # ── Telegram (set for TMA invite links) ──
+      TG_BOT_USERNAME: "${TG_BOT_USERNAME:-}"
+      TG_APP_NAME: "${TG_APP_NAME:-}"
       # URLs are auto-detected from browser location when empty.
       # Set explicitly only for non-standard deployments:
       # WS_SERVER_URL: "ws://localhost:3000"

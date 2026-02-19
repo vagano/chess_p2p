@@ -16,6 +16,10 @@ export interface AppConfig {
   signalingServers: string[];
   /** Backend HTTP URL for REST API calls (e.g. "http://localhost:8080") */
   apiBaseUrl: string;
+  /** Telegram bot username (without @) for deep links */
+  tgBotUsername: string;
+  /** Telegram Mini App short name for deep links */
+  tgAppName: string;
 }
 
 declare global {
@@ -24,7 +28,7 @@ declare global {
   }
 }
 
-function detectDefaults(): Omit<AppConfig, 'connectionMode'> {
+function detectDefaults(): Omit<AppConfig, 'connectionMode' | 'tgBotUsername' | 'tgAppName'> {
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const httpProto = window.location.protocol;
   const host = window.location.host;
@@ -65,7 +69,17 @@ function resolveConfig(): AppConfig {
     (env.VITE_API_BASE_URL as string) ??
     defaults.apiBaseUrl;
 
-  return { connectionMode, wsServerUrl, signalingServers, apiBaseUrl };
+  const tgBotUsername =
+    runtime.tgBotUsername ??
+    (env.VITE_TG_BOT_USERNAME as string) ??
+    '';
+
+  const tgAppName =
+    runtime.tgAppName ??
+    (env.VITE_TG_APP_NAME as string) ??
+    '';
+
+  return { connectionMode, wsServerUrl, signalingServers, apiBaseUrl, tgBotUsername, tgAppName };
 }
 
 /** Singleton app config — resolved once at startup */

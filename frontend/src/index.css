@@ -39,11 +39,9 @@ code {
   background: rgba(0, 0, 0, 0.25);
 }
 
-/* Safe area for devices with notch / Telegram header */
 #root {
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Mobile layout: stack sidebar below the board */
@@ -57,5 +55,16 @@ code {
     width: 100% !important;
     min-width: unset !important;
     max-width: 100% !important;
+  }
+
+  .eval-bar-desktop {
+    display: none !important;
+  }
+}
+
+/* Desktop: show eval bar */
+@media (min-width: 601px) {
+  .eval-bar-mobile {
+    display: none !important;
   }
 }

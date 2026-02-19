@@ -66,6 +66,8 @@ services:
     container_name: p2p_chess_frontend_init
     environment:
       CONNECTION_MODE: "hybrid"
+      TG_BOT_USERNAME: ${TG_BOT_USERNAME:-}
+      TG_APP_NAME: ${TG_APP_NAME:-}
     volumes:
       - frontend_dist:/srv
 

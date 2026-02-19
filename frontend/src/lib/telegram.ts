@@ -4,6 +4,8 @@
  * graceful fallback when running outside Telegram (browser dev mode).
  */
 
+import { config } from './config';
+
 interface TelegramUser {
   id: number;
   first_name: string;
@@ -167,7 +169,7 @@ export function hideBackButton(): void {
   getWebApp()?.BackButton?.hide();
 }
 
-// --- Navigation ---
+// --- Navigation / Sharing ---
 
 export function openTelegramLink(url: string): void {
   const wa = getWebApp();
@@ -180,6 +182,26 @@ export function openTelegramLink(url: string): void {
 
 export function switchInlineQuery(query: string): void {
   getWebApp()?.switchInlineQuery(query, ['users', 'groups', 'channels']);
+}
+
+/**
+ * Share a room invite. In Telegram — opens a share dialog via t.me link.
+ * Outside Telegram — copies the browser URL to clipboard.
+ */
+export function shareRoom(roomId: string): void {
+  const { tgBotUsername, tgAppName } = config;
+
+  if (isTelegram() && tgBotUsername && tgAppName) {
+    const link = `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`;
+    const text = 'Join my chess game!';
+    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+    getWebApp()!.openTelegramLink(shareUrl);
+  } else if (tgBotUsername && tgAppName) {
+    const link = `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`;
+    navigator.clipboard.writeText(link).catch(() => {});
+  } else {
+    navigator.clipboard.writeText(window.location.href).catch(() => {});
+  }
 }
 
 // --- Theming ---
