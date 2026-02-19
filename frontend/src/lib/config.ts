@@ -34,7 +34,7 @@ function detectDefaults(): Omit<AppConfig, 'connectionMode' | 'tgBotUsername' | 
   const host = window.location.host;
 
   return {
-    wsServerUrl: `${proto}//${host}`,
+    wsServerUrl: `${proto}//${host}/ws`,
     signalingServers: [`${proto}//${host}/signaling`],
     apiBaseUrl: `${httpProto}//${host}`,
   };
