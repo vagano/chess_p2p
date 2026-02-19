@@ -94,7 +94,9 @@ function getWebApp(): TelegramWebApp | null {
 /** Whether the app is running inside Telegram WebView */
 export function isTelegram(): boolean {
   const wa = getWebApp();
-  return !!wa && !!wa.initData && wa.initData.length > 0;
+  const result = !!wa && !!wa.initData && wa.initData.length > 0;
+  console.log('[Telegram] isTelegram:', result, 'initData length:', wa?.initData?.length ?? 0);
+  return result;
 }
 
 /** Raw initData string for server-side validation */
@@ -109,7 +111,9 @@ export function getTelegramUser(): TelegramUser | null {
 
 /** The startapp parameter from the deep link */
 export function getStartParam(): string | null {
-  return getWebApp()?.initDataUnsafe?.start_param ?? null;
+  const param = getWebApp()?.initDataUnsafe?.start_param ?? null;
+  console.log('[Telegram] getStartParam:', param, 'initDataUnsafe:', JSON.stringify(getWebApp()?.initDataUnsafe));
+  return param;
 }
 
 /** Current color scheme */
@@ -188,40 +192,55 @@ export function switchInlineQuery(query: string): void {
 }
 
 /**
- * Share a room invite link.
- * In Telegram: shares the t.me deep link (for Telegram users).
- * In browser: copies the current web URL to clipboard.
+ * Build the correct invite link depending on context.
+ * Telegram users get t.me deep link, browser users get the web URL.
  */
-export function shareRoom(roomId: string): void {
+function buildInviteLink(roomId: string, forTelegram: boolean): string {
   const { tgBotUsername, tgAppName } = config;
+  if (forTelegram && tgBotUsername && tgAppName) {
+    return `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`;
+  }
+  const origin = window.location.origin;
+  return `${origin}/room/${roomId}`;
+}
+
+/**
+ * Share a room invite link.
+ * In Telegram: t.me deep link via native share or clipboard.
+ * In browser: web URL via native share or clipboard.
+ */
+export async function shareRoom(roomId: string): Promise<void> {
   const wa = getWebApp();
+  const inTelegram = !!wa;
+  const link = buildInviteLink(roomId, inTelegram);
 
-  if (wa) {
-    const tgLink = (tgBotUsername && tgAppName)
-      ? `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`
-      : null;
+  console.log('[shareRoom] inTelegram:', inTelegram, 'link:', link);
 
-    console.log('[shareRoom] TG mode, tgBotUsername:', tgBotUsername, 'tgAppName:', tgAppName, 'link:', tgLink);
-
-    if (tgLink) {
-      // Strategy 1: Telegram share dialog with the deep link
-      try {
-        const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(tgLink)}&text=${encodeURIComponent('♟ Join my chess game!')}`;
-        wa.openTelegramLink(shareUrl);
-        return;
-      } catch { /* fall through */ }
+  // 1) Try Web Share API (works in Telegram WebView on mobile)
+  if (navigator.share) {
+    try {
+      await navigator.share({ url: link });
+      return;
+    } catch {
+      // User cancelled or API not fully supported — fall through
     }
-
-    // Fallback: show alert with whatever link we have
-    wa.showAlert(tgLink ?? window.location.href);
-    return;
   }
 
-  // Browser mode: copy the current web URL
-  const webLink = window.location.href;
-  navigator.clipboard.writeText(webLink)
-    .then(() => alert('Link copied!'))
-    .catch(() => prompt('Copy this link:', webLink));
+  // 2) Copy to clipboard
+  try {
+    await navigator.clipboard.writeText(link);
+    if (wa) {
+      wa.showAlert('Link copied!\n' + link);
+    } else {
+      alert('Link copied!');
+    }
+  } catch {
+    if (wa) {
+      wa.showAlert(link);
+    } else {
+      prompt('Copy this link:', link);
+    }
+  }
 }
 
 // --- Theming ---

@@ -4,7 +4,6 @@ import { nanoid } from 'nanoid';
 import {
   isTelegram,
   getTelegramUser,
-  getStartParam,
   showMainButton,
   hideMainButton,
   hideBackButton,
@@ -14,14 +13,6 @@ export function Home() {
   const navigate = useNavigate();
   const [joinRoomId, setJoinRoomId] = useState('');
   const tgUser = getTelegramUser();
-
-  // Auto-redirect if opened via Telegram deep link with startapp=roomId
-  useEffect(() => {
-    const startParam = getStartParam();
-    if (startParam) {
-      navigate(`/room/${startParam}`);
-    }
-  }, [navigate]);
 
   // Telegram MainButton: "Create New Game"
   useEffect(() => {
