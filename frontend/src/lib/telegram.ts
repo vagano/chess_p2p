@@ -189,33 +189,37 @@ export function switchInlineQuery(query: string): void {
 
 /**
  * Share a room invite link.
- * In Telegram: uses switchInlineQuery to let user pick a chat.
- * Fallback: copies the invite link to clipboard.
+ * Strategy: switchInlineQuery → openTelegramLink/share → clipboard.
  */
 export function shareRoom(roomId: string): void {
   const { tgBotUsername, tgAppName } = config;
   const wa = getWebApp();
-
-  if (wa && tgBotUsername) {
-    try {
-      wa.switchInlineQuery(roomId, ['users', 'groups', 'channels']);
-      return;
-    } catch {
-      // switchInlineQuery may not be supported — fall through
-    }
-  }
 
   const inviteLink = (tgBotUsername && tgAppName)
     ? `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`
     : window.location.href;
 
   if (wa) {
-    wa.showAlert(`Share this link:\n${inviteLink}`);
-  } else {
-    navigator.clipboard.writeText(inviteLink)
-      .then(() => alert('Link copied!'))
-      .catch(() => prompt('Copy this link:', inviteLink));
+    // Strategy 1: switchInlineQuery (WebApp 6.7+, doesn't close the app)
+    if (typeof wa.switchInlineQuery === 'function' && tgBotUsername) {
+      try {
+        wa.switchInlineQuery(roomId, ['users', 'groups', 'channels']);
+        return;
+      } catch { /* fall through */ }
+    }
+
+    // Strategy 2: open Telegram share dialog (closes the Mini App)
+    try {
+      const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(inviteLink)}&text=${encodeURIComponent('Join my chess game!')}`;
+      wa.openTelegramLink(shareUrl);
+      return;
+    } catch { /* fall through */ }
   }
+
+  // Strategy 3: clipboard (browser / fallback)
+  navigator.clipboard.writeText(inviteLink)
+    .then(() => alert('Link copied!'))
+    .catch(() => prompt('Copy this link:', inviteLink));
 }
 
 // --- Theming ---
