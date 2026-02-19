@@ -1,0 +1,40 @@
+{$DOMAIN} {
+	# ── WebSocket: y-websocket ──
+	@ws path /ws/*
+	reverse_proxy @ws frontend:80
+
+	# ── WebSocket: y-webrtc signaling ──
+	@signaling path /signaling
+	reverse_proxy @signaling frontend:80
+
+	# ── REST API ──
+	@api path /api/*
+	reverse_proxy @api frontend:80
+
+	# ── Health check ──
+	@health path /health
+	reverse_proxy @health frontend:80
+
+	# ── Telegram Bot webhook ──
+	@webhook path /bot/webhook
+	reverse_proxy @webhook frontend:80
+
+	# ── Frontend SPA (default) ──
+	reverse_proxy frontend:80
+
+	# Pass real client IP
+	header_up X-Real-IP {remote_host}
+	header_up X-Forwarded-For {remote_host}
+	header_up X-Forwarded-Proto {scheme}
+
+	# Security headers
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# Gzip
+	encode gzip
+}

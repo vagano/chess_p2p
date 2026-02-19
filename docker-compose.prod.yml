@@ -1,0 +1,96 @@
+services:
+  # ── PostgreSQL ───────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: p2p_chess_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-p2p_chess}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── Go Backend ───────────────────────────────────────────────
+  backend:
+    build: ./backend
+    container_name: p2p_chess_backend
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-p2p_chess}?sslmode=disable"
+      STOCKFISH_PATH: "/usr/games/stockfish"
+      FRONTEND_URL: "https://${DOMAIN:?Set DOMAIN in .env}"
+
+      # ── Telegram ──
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
+      TELEGRAM_WEBAPP_URL: "https://${DOMAIN}"
+      TELEGRAM_WEBHOOK_URL: "https://${DOMAIN}/bot/webhook"
+      SKIP_TG_AUTH: "false"
+
+      # ── CORS ──
+      CORS_ORIGINS: "https://${DOMAIN}"
+
+      # ── Rate Limiting ──
+      RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-true}"
+      RATE_LIMIT_EVALUATE_RPS: "${RATE_LIMIT_EVALUATE_RPS:-2}"
+      RATE_LIMIT_EVALUATE_BURST: "${RATE_LIMIT_EVALUATE_BURST:-5}"
+      RATE_LIMIT_API_RPM: "${RATE_LIMIT_API_RPM:-60}"
+      RATE_LIMIT_API_BURST: "${RATE_LIMIT_API_BURST:-10}"
+      RATE_LIMIT_WS_MPS: "${RATE_LIMIT_WS_MPS:-10}"
+      RATE_LIMIT_WS_BURST: "${RATE_LIMIT_WS_BURST:-20}"
+      TRUST_PROXY: "true"
+
+      # ── WebSocket ──
+      WS_MAX_MESSAGE_SIZE: "${WS_MAX_MESSAGE_SIZE:-65536}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── Frontend (Nginx serves SPA, proxies to backend) ─────────
+  frontend:
+    build: ./frontend
+    container_name: p2p_chess_frontend
+    restart: unless-stopped
+    environment:
+      CONNECTION_MODE: "hybrid"
+    depends_on:
+      - backend
+    networks:
+      - internal
+
+  # ── Caddy (TLS termination + reverse proxy) ─────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: p2p_chess_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge
