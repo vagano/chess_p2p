@@ -112,11 +112,11 @@ func main() {
 	// HTTP routes
 	mux := http.NewServeMux()
 
-	// y-websocket endpoint (auth via query param)
-	mux.Handle("/ws/", tgAuth.Middleware(http.HandlerFunc(wsHandler.HandleYjsWS)))
+	// y-websocket endpoint (public — CRDT sync is self-validating)
+	mux.Handle("/ws/", http.HandlerFunc(wsHandler.HandleYjsWS))
 
-	// WebRTC signaling endpoint
-	mux.Handle("/signaling", tgAuth.Middleware(http.HandlerFunc(sigHandler.HandleSignaling)))
+	// WebRTC signaling endpoint (public — only relays SDP/ICE)
+	mux.Handle("/signaling", http.HandlerFunc(sigHandler.HandleSignaling))
 
 	// REST API (protected + rate limited)
 	mux.Handle("/api/room/", apiLimiter.Middleware(tgAuth.Middleware(http.HandlerFunc(handleRoomAPI(store))), rlConf.TrustProxy))
