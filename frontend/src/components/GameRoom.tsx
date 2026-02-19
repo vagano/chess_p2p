@@ -217,6 +217,14 @@ export function GameRoom() {
           padding: '2px 0 6px',
         }}>
           <ConnectionStatus state={connectionState} peerCount={peerCount} />
+          <span style={{
+            fontSize: '10px',
+            fontFamily: 'monospace',
+            color: 'var(--tg-theme-hint-color, #888)',
+            opacity: 0.7,
+          }}>
+            {roomId}
+          </span>
         </div>
       )}
 

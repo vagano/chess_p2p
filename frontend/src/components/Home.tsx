@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import {
   isTelegram,
   getTelegramUser,
+  getStartParam,
   showMainButton,
   hideMainButton,
   hideBackButton,
@@ -13,6 +14,8 @@ export function Home() {
   const navigate = useNavigate();
   const [joinRoomId, setJoinRoomId] = useState('');
   const tgUser = getTelegramUser();
+  const tgMode = isTelegram();
+  const startParam = getStartParam();
 
   // Telegram MainButton: "Create New Game"
   useEffect(() => {
@@ -152,10 +155,30 @@ export function Home() {
           </button>
         </div>
 
+        {/* Debug: TMA deep link diagnostic */}
+        {tgMode && (
+          <div style={{
+            marginTop: '24px',
+            padding: '10px',
+            borderRadius: '8px',
+            background: 'rgba(255,255,255,0.06)',
+            fontSize: '11px',
+            fontFamily: 'monospace',
+            color: 'var(--tg-theme-hint-color, rgba(255,255,255,0.5))',
+            textAlign: 'left',
+            wordBreak: 'break-all',
+          }}>
+            <div>start_param: <b style={{ color: startParam ? '#66bb6a' : '#ef5350' }}>{startParam || 'null'}</b></div>
+            <div>initData: {window.Telegram?.WebApp?.initData ? `${window.Telegram.WebApp.initData.length} chars` : 'empty'}</div>
+            <div>platform: {window.Telegram?.WebApp?.platform ?? '?'}</div>
+            <div>version: {window.Telegram?.WebApp?.version ?? '?'}</div>
+          </div>
+        )}
+
         {/* Footer */}
         <p
           style={{
-            marginTop: '40px',
+            marginTop: '20px',
             fontSize: '12px',
             color: 'var(--tg-theme-hint-color, rgba(255,255,255,0.3))',
           }}
