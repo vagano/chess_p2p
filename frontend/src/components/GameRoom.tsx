@@ -15,7 +15,9 @@ import {
   syncSeatingToGameMap,
   getPlayersMap,
 } from '../lib/gameState';
+import { persistRoom } from '../App';
 import { fetchEvaluation, type EvalResult } from '../lib/evaluation';
+import { config } from '../lib/config';
 import {
   isTelegram,
   getTelegramUser,
@@ -38,6 +40,9 @@ export function GameRoom() {
     navigate('/');
     return null;
   }
+
+  // Persist roomId so TMA can restore after WebView reload
+  persistRoom(roomId);
 
   const { doc, connectionState, isP2P, syncWithServer, peerCount } =
     useYjsSync({ roomId });
@@ -211,20 +216,35 @@ export function GameRoom() {
       {tgMode && (
         <div style={{
           width: '100%',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
           padding: '2px 0 6px',
         }}>
-          <ConnectionStatus state={connectionState} peerCount={peerCount} />
-          <span style={{
-            fontSize: '10px',
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <ConnectionStatus state={connectionState} peerCount={peerCount} />
+            <span style={{
+              fontSize: '10px',
+              fontFamily: 'monospace',
+              color: 'var(--tg-theme-hint-color, #888)',
+              opacity: 0.7,
+            }}>
+              {roomId}
+            </span>
+          </div>
+          {/* DEBUG: connection diagnostics */}
+          <div style={{
+            marginTop: '4px',
+            padding: '6px 8px',
+            borderRadius: '6px',
+            background: 'rgba(255,255,255,0.05)',
+            fontSize: '9px',
             fontFamily: 'monospace',
             color: 'var(--tg-theme-hint-color, #888)',
-            opacity: 0.7,
+            wordBreak: 'break-all',
           }}>
-            {roomId}
-          </span>
+            <div>state: <b>{connectionState}</b> | peers: {peerCount}</div>
+            <div>ws: {config.wsServerUrl}</div>
+            <div>sig: {config.signalingServers[0]}</div>
+            <div>mode: {config.connectionMode}</div>
+          </div>
         </div>
       )}
 

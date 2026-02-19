@@ -206,8 +206,8 @@ function buildInviteLink(roomId: string, forTelegram: boolean): string {
 
 /**
  * Share a room invite link.
- * In Telegram: t.me deep link via native share or clipboard.
- * In browser: web URL via native share or clipboard.
+ * In Telegram: copies t.me deep link to clipboard (navigator.share causes WebView reload).
+ * In browser: native share or clipboard.
  */
 export async function shareRoom(roomId: string): Promise<void> {
   const wa = getWebApp();
@@ -216,30 +216,30 @@ export async function shareRoom(roomId: string): Promise<void> {
 
   console.log('[shareRoom] inTelegram:', inTelegram, 'link:', link);
 
-  // 1) Try Web Share API (works in Telegram WebView on mobile)
+  if (inTelegram) {
+    // In TMA: copy to clipboard + alert (do NOT use navigator.share — it reloads the WebView)
+    try {
+      await navigator.clipboard.writeText(link);
+      wa!.showAlert('Link copied!\n\n' + link);
+    } catch {
+      wa!.showAlert(link);
+    }
+    return;
+  }
+
+  // Browser: try native share, then clipboard
   if (navigator.share) {
     try {
       await navigator.share({ url: link });
       return;
-    } catch {
-      // User cancelled or API not fully supported — fall through
-    }
+    } catch { /* cancelled */ }
   }
 
-  // 2) Copy to clipboard
   try {
     await navigator.clipboard.writeText(link);
-    if (wa) {
-      wa.showAlert('Link copied!\n' + link);
-    } else {
-      alert('Link copied!');
-    }
+    alert('Link copied!');
   } catch {
-    if (wa) {
-      wa.showAlert(link);
-    } else {
-      prompt('Copy this link:', link);
-    }
+    prompt('Copy this link:', link);
   }
 }
 

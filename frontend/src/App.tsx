@@ -1,14 +1,36 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Home } from './components/Home';
 import { GameRoom } from './components/GameRoom';
-import { getStartParam } from './lib/telegram';
+import { getStartParam, isTelegram } from './lib/telegram';
+
+const ROOM_KEY = 'p2p_chess_room';
+
+/** Save current roomId so we can restore after TMA WebView reload */
+export function persistRoom(roomId: string): void {
+  try { sessionStorage.setItem(ROOM_KEY, roomId); } catch { /* noop */ }
+}
 
 function StartParamRedirect() {
   const startParam = getStartParam();
   console.log('[StartParamRedirect] start_param:', startParam);
+
+  // 1) Telegram deep link: startapp=roomId
   if (startParam) {
+    persistRoom(startParam);
     return <Navigate to={`/room/${startParam}`} replace />;
   }
+
+  // 2) Restore after TMA WebView reload
+  if (isTelegram()) {
+    try {
+      const saved = sessionStorage.getItem(ROOM_KEY);
+      if (saved) {
+        console.log('[StartParamRedirect] restoring room from session:', saved);
+        return <Navigate to={`/room/${saved}`} replace />;
+      }
+    } catch { /* noop */ }
+  }
+
   return <Home />;
 }
 
