@@ -6,9 +6,10 @@ interface GameStatusProps {
   game: Chess;
   playerColor: 'white' | 'black' | null;
   isMyTurn: boolean;
+  isCheck: boolean;
 }
 
-export function GameStatus({ gameState, game, playerColor, isMyTurn }: GameStatusProps) {
+export function GameStatus({ gameState, game, playerColor, isMyTurn, isCheck }: GameStatusProps) {
   const renderStatus = () => {
     if (gameState.status === 'waiting') {
       return <span style={{ color: '#ff9800' }}>Waiting for opponent...</span>;
@@ -41,9 +42,12 @@ export function GameStatus({ gameState, game, playerColor, isMyTurn }: GameStatu
       return <span style={{ color: '#f44336', fontWeight: 'bold' }}>{message}</span>;
     }
 
-    // Playing
-    if (game.isCheck()) {
-      return <span style={{ color: '#f44336' }}>Check! {isMyTurn ? 'Your move' : "Opponent's move"}</span>;
+    if (isCheck) {
+      return (
+        <span style={{ color: '#f44336', fontWeight: 'bold' }}>
+          ⚠ Check! {isMyTurn ? 'Your move' : "Opponent's move"}
+        </span>
+      );
     }
 
     return (
@@ -57,11 +61,10 @@ export function GameStatus({ gameState, game, playerColor, isMyTurn }: GameStatu
     const moves = gameState.moves;
     if (moves.length === 0) return null;
 
-    // Parse PGN to get SAN moves
     const pgnMoves = gameState.pgn
-      .replace(/\[.*?\]\s*/g, '')  // remove headers
-      .replace(/\d+\.\s*/g, '')    // remove move numbers
-      .replace(/\s+/g, ' ')       // normalize spaces
+      .replace(/\[.*?\]\s*/g, '')
+      .replace(/\d+\.\s*/g, '')
+      .replace(/\s+/g, ' ')
       .trim()
       .split(' ')
       .filter((m) => m && !['1-0', '0-1', '1/2-1/2', '*'].includes(m));

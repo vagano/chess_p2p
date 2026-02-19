@@ -136,6 +136,14 @@ func (a *Analyzer) AnalyzePosition(fen string, depth int) (*AnalysisResult, erro
 	}
 	result.PV = strings.Join(pvMoves, " ")
 
+	// Log evaluation
+	scoreStr := fmt.Sprintf("%+.2f", float64(result.ScoreCp)/100.0)
+	if result.IsMate {
+		scoreStr = fmt.Sprintf("M%d", result.MateIn)
+	}
+	wdl := fmt.Sprintf("W:%.0f%% D:%.0f%% L:%.0f%%", result.WinPct*100, result.DrawPct*100, result.LossPct*100)
+	log.Printf("[Stockfish] depth=%d score=%s best=%s pv=%s %s", result.Depth, scoreStr, result.BestMove, result.PV, wdl)
+
 	return result, nil
 }
 
@@ -157,6 +165,21 @@ func (a *Analyzer) AnalyzeGameAsync(gameID uuid.UUID, fens []string, depth int) 
 
 			// Classify the move
 			classification := ClassifyMove(prevScore, result.ScoreCp, result.BestMove, i)
+
+			// Log each move analysis
+			side := "W"
+			if i%2 == 1 {
+				side = "B"
+			}
+			moveNum := (i / 2) + 1
+			scoreStr := fmt.Sprintf("%+.2f", float64(result.ScoreCp)/100.0)
+			if result.IsMate {
+				scoreStr = fmt.Sprintf("M%d", result.MateIn)
+			}
+			log.Printf("[Analysis] Game %s | %d.%s score=%s best=%s class=%s (prev=%+.2f → %+.2f)",
+				gameID.String()[:8], moveNum, side, scoreStr, result.BestMove, classification,
+				float64(prevScore)/100.0, float64(result.ScoreCp)/100.0)
+
 			prevScore = result.ScoreCp
 
 			// Save to DB

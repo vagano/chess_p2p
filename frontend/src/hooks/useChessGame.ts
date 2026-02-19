@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Chess, Square, Move } from 'chess.js';
 import * as Y from 'yjs';
 import {
@@ -21,6 +21,8 @@ interface UseChessGameReturn {
   gameState: GameState;
   position: string;
   isMyTurn: boolean;
+  isCheck: boolean;
+  kingSquare: Square | null;
   makeMove: (from: Square, to: Square, promotion?: string) => boolean;
   isGameOver: boolean;
   lastMove: { from: Square; to: Square } | null;
@@ -28,24 +30,25 @@ interface UseChessGameReturn {
 }
 
 /**
- * Replay all UCI moves from the initial position.
- * This preserves full PGN history in chess.js (unlike chess.load(fen)
- * which loads only the position and loses the move history).
+ * Replay UCI moves from the initial position.
+ * Returns the number of moves successfully applied.
  */
-function replayMoves(chess: Chess, moves: string[]): void {
+function replayMoves(chess: Chess, moves: string[]): number {
   chess.reset();
+  let applied = 0;
   for (const uci of moves) {
     const from = uci.substring(0, 2) as Square;
     const to = uci.substring(2, 4) as Square;
     const promotion = uci.length > 4 ? uci[4] : undefined;
     try {
       chess.move({ from, to, promotion });
+      applied++;
     } catch {
-      // If a move fails, stop replaying — state might be partially synced
-      console.warn('[useChessGame] Replay failed at move:', uci);
+      console.warn('[useChessGame] Replay failed at move', applied + 1, ':', uci);
       break;
     }
   }
+  return applied;
 }
 
 export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChessGameReturn {
@@ -53,8 +56,32 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
   const [position, setPosition] = useState(INITIAL_FEN);
   const [gameState, setGameState] = useState<GameState>(readGameState(doc));
   const [lastMove, setLastMove] = useState<{ from: Square; to: Square } | null>(null);
-  // Track the number of moves we've applied so we know when to re-sync
+  const [turnColor, setTurnColor] = useState<'w' | 'b'>('w');
+  const [checkState, setCheckState] = useState(false);
+  const [kingSquare, setKingSquare] = useState<Square | null>(null);
   const appliedMovesCountRef = useRef(0);
+
+  const syncChessState = useCallback(() => {
+    const chess = chessRef.current;
+    setPosition(chess.fen());
+    setTurnColor(chess.turn());
+    const inCheck = chess.isCheck();
+    setCheckState(inCheck);
+    if (inCheck) {
+      const board = chess.board();
+      const turn = chess.turn();
+      for (const row of board) {
+        for (const sq of row) {
+          if (sq && sq.type === 'k' && sq.color === turn) {
+            setKingSquare(sq.square as Square);
+            return;
+          }
+        }
+      }
+    } else {
+      setKingSquare(null);
+    }
+  }, []);
 
   // Sync from Yjs doc changes (remote updates)
   useEffect(() => {
@@ -66,25 +93,22 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
 
       const remoteMoves = state.moves || [];
 
-      // Only re-sync if the move count changed
       if (remoteMoves.length !== appliedMovesCountRef.current) {
-        // Replay ALL moves from the start to preserve full PGN history
-        replayMoves(chessRef.current, remoteMoves);
-        appliedMovesCountRef.current = remoteMoves.length;
+        const applied = replayMoves(chessRef.current, remoteMoves);
+        appliedMovesCountRef.current = applied;
 
-        const fen = chessRef.current.fen();
-        setPosition(fen);
+        syncChessState();
 
-        // Update last move indicator
         if (remoteMoves.length > 0) {
-          const lastUci = remoteMoves[remoteMoves.length - 1];
-          setLastMove({
-            from: lastUci.substring(0, 2) as Square,
-            to: lastUci.substring(2, 4) as Square,
-          });
+          const lastUci = remoteMoves[Math.min(applied, remoteMoves.length) - 1];
+          if (lastUci) {
+            setLastMove({
+              from: lastUci.substring(0, 2) as Square,
+              to: lastUci.substring(2, 4) as Square,
+            });
+          }
         }
 
-        // Check game over conditions
         checkGameOver(state);
       }
     };
@@ -93,7 +117,7 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
     return () => {
       gameMap.unobserveDeep(observer);
     };
-  }, [doc]);
+  }, [doc, syncChessState]);
 
   const checkGameOver = useCallback(
     (state: GameState) => {
@@ -114,19 +138,30 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
     [doc]
   );
 
-  const isMyTurn = playerColor
-    ? (chessRef.current.turn() === 'w' && playerColor === 'white') ||
-      (chessRef.current.turn() === 'b' && playerColor === 'black')
-    : false;
+  const isMyTurn = useMemo(() => {
+    if (!playerColor || gameState.status !== 'playing') return false;
+    return (
+      (turnColor === 'w' && playerColor === 'white') ||
+      (turnColor === 'b' && playerColor === 'black')
+    );
+  }, [playerColor, turnColor, gameState.status]);
 
   const makeMove = useCallback(
     (from: Square, to: Square, promotion?: string): boolean => {
-      if (!playerColor || !isMyTurn) return false;
-      if (gameState.status === 'finished') return false;
+      if (!playerColor) return false;
+      if (gameState.status === 'finished' || gameState.status === 'waiting') return false;
 
       const chess = chessRef.current;
-      let move: Move | null = null;
 
+      // Double-check it's actually this player's turn
+      const myTurnNow =
+        (chess.turn() === 'w' && playerColor === 'white') ||
+        (chess.turn() === 'b' && playerColor === 'black');
+      if (!myTurnNow) return false;
+
+      if (chess.isGameOver()) return false;
+
+      let move: Move | null = null;
       try {
         move = chess.move({ from, to, promotion: promotion || 'q' });
       } catch {
@@ -135,34 +170,36 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
 
       if (!move) return false;
 
-      // Build UCI notation
       const uci = `${move.from}${move.to}${move.promotion || ''}`;
 
-      // Update applied count so observer doesn't re-replay
       appliedMovesCountRef.current = (gameState.moves?.length || 0) + 1;
 
-      // Update Yjs doc — chess.pgn() now has full history because we replay
       updateGameMove(doc, chess.fen(), chess.pgn(), uci);
 
-      setPosition(chess.fen());
+      syncChessState();
       setLastMove({ from: move.from as Square, to: move.to as Square });
 
-      // Check game over
       const newState = readGameState(doc);
       checkGameOver(newState);
 
       return true;
     },
-    [doc, playerColor, isMyTurn, gameState.status, gameState.moves, checkGameOver]
+    [doc, playerColor, gameState.status, gameState.moves, checkGameOver, syncChessState]
   );
 
   const possibleMoves = useCallback(
     (square: Square): string[] => {
-      if (!playerColor || !isMyTurn) return [];
-      const moves = chessRef.current.moves({ square, verbose: true });
+      if (!playerColor) return [];
+      const chess = chessRef.current;
+      const myTurnNow =
+        (chess.turn() === 'w' && playerColor === 'white') ||
+        (chess.turn() === 'b' && playerColor === 'black');
+      if (!myTurnNow) return [];
+      if (chess.isGameOver()) return [];
+      const moves = chess.moves({ square, verbose: true });
       return moves.map((m) => m.to);
     },
-    [playerColor, isMyTurn]
+    [playerColor, turnColor]
   );
 
   return {
@@ -170,6 +207,8 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
     gameState,
     position,
     isMyTurn,
+    isCheck: checkState,
+    kingSquare,
     makeMove,
     isGameOver: gameState.status === 'finished',
     lastMove,

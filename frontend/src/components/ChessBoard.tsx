@@ -6,19 +6,29 @@ interface ChessBoardProps {
   position: string;
   playerColor: 'white' | 'black' | null;
   isMyTurn: boolean;
+  isCheck: boolean;
   onMove: (from: Square, to: Square, promotion?: string) => boolean;
   possibleMoves: (square: Square) => string[];
   lastMove: { from: Square; to: Square } | null;
+  kingSquare: Square | null;
   boardWidth?: number;
+}
+
+function isOwnPiece(pieceType: string, playerColor: 'white' | 'black'): boolean {
+  const firstChar = pieceType.charAt(0);
+  return (playerColor === 'white' && firstChar === 'w') ||
+         (playerColor === 'black' && firstChar === 'b');
 }
 
 export function ChessBoardComponent({
   position,
   playerColor,
   isMyTurn,
+  isCheck,
   onMove,
   possibleMoves,
   lastMove,
+  kingSquare,
   boardWidth = 480,
 }: ChessBoardProps) {
   const [moveFrom, setMoveFrom] = useState<Square | null>(null);
@@ -27,7 +37,6 @@ export function ChessBoardComponent({
   const highlightStyles = useMemo(() => {
     const styles: Record<string, React.CSSProperties> = {};
 
-    // Highlight last move
     if (lastMove) {
       styles[lastMove.from] = {
         background: 'rgba(255, 255, 0, 0.3)',
@@ -37,16 +46,28 @@ export function ChessBoardComponent({
       };
     }
 
-    return { ...styles, ...optionSquares };
-  }, [lastMove, optionSquares]);
+    if (isCheck && kingSquare) {
+      styles[kingSquare] = {
+        background: 'radial-gradient(ellipse at center, rgba(255, 0, 0, 0.6) 0%, rgba(255, 0, 0, 0.3) 40%, transparent 70%)',
+      };
+    }
 
-  // v5 API: onSquareClick receives { piece, square }
+    return { ...styles, ...optionSquares };
+  }, [lastMove, optionSquares, isCheck, kingSquare]);
+
+  const canDragPiece = useCallback(
+    (args: { isSparePiece: boolean; piece: { pieceType: string }; square: string | null }): boolean => {
+      if (!isMyTurn || !playerColor) return false;
+      return isOwnPiece(args.piece.pieceType, playerColor);
+    },
+    [isMyTurn, playerColor]
+  );
+
   const onSquareClick = useCallback(
     (args: { piece: unknown; square: string }) => {
       const square = args.square as Square;
       if (!isMyTurn || !playerColor) return;
 
-      // If we already have a piece selected, try to move
       if (moveFrom) {
         const success = onMove(moveFrom, square);
         setMoveFrom(null);
@@ -54,7 +75,6 @@ export function ChessBoardComponent({
         if (success) return;
       }
 
-      // Select the piece and show possible moves
       const moves = possibleMoves(square);
       if (moves.length > 0) {
         const newSquares: Record<string, React.CSSProperties> = {};
@@ -78,7 +98,6 @@ export function ChessBoardComponent({
     [isMyTurn, playerColor, moveFrom, onMove, possibleMoves]
   );
 
-  // v5 API: onPieceDrop receives { piece, sourceSquare, targetSquare }
   const onPieceDrop = useCallback(
     (args: { piece: unknown; sourceSquare: string; targetSquare: string | null }): boolean => {
       if (!isMyTurn || !playerColor) return false;
@@ -103,6 +122,7 @@ export function ChessBoardComponent({
           boardOrientation: orientation,
           onPieceDrop,
           onSquareClick,
+          canDragPiece,
           squareStyles: highlightStyles,
           boardStyle: {
             borderRadius: '4px',

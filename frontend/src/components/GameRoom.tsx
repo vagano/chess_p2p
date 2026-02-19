@@ -5,6 +5,7 @@ import { ChessBoardComponent } from './ChessBoard';
 import { ConnectionStatus } from './ConnectionStatus';
 import { GameStatus } from './GameStatus';
 import { EvalBar } from './EvalBar';
+import { StockfishInfo } from './StockfishInfo';
 import { GameAnalysis } from './GameAnalysis';
 import { useYjsSync } from '../hooks/useYjsSync';
 import { useChessGame } from '../hooks/useChessGame';
@@ -96,7 +97,7 @@ export function GameRoom() {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  const { game, gameState, position, isMyTurn, makeMove: rawMakeMove, isGameOver, lastMove, possibleMoves } =
+  const { game, gameState, position, isMyTurn, isCheck, kingSquare, makeMove: rawMakeMove, isGameOver, lastMove, possibleMoves } =
     useChessGame({ doc, playerColor });
 
   const makeMove = useCallback(
@@ -262,9 +263,11 @@ export function GameRoom() {
             position={position}
             playerColor={playerColor}
             isMyTurn={isMyTurn}
+            isCheck={isCheck}
             onMove={makeMove}
             possibleMoves={possibleMoves}
             lastMove={lastMove}
+            kingSquare={kingSquare}
             boardWidth={boardWidth}
           />
         </div>
@@ -284,6 +287,12 @@ export function GameRoom() {
             game={game}
             playerColor={playerColor}
             isMyTurn={isMyTurn}
+            isCheck={isCheck}
+          />
+
+          <StockfishInfo
+            evalResult={evalResult}
+            moveCount={gameState.moves.length}
           />
 
           {/* Room info */}
