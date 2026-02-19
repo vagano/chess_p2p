@@ -27,11 +27,6 @@ export function EvalBar({
     }
   }
 
-  // Flip for black orientation
-  if (orientation === 'black') {
-    whitePct = 100 - whitePct;
-  }
-
   const formatEval = () => {
     if (evaluation === null) return '?';
     if (isMate && mateIn !== null) {
@@ -40,6 +35,9 @@ export function EvalBar({
     const val = evaluation / 100;
     return val >= 0 ? `+${val.toFixed(1)}` : val.toFixed(1);
   };
+
+  // White fills from white's side: bottom when white is at bottom, top when black is at bottom
+  const whiteAnchor = orientation === 'white' ? 'bottom' : 'top';
 
   return (
     <div
@@ -54,11 +52,11 @@ export function EvalBar({
         flexShrink: 0,
       }}
     >
-      {/* White portion (from bottom) */}
+      {/* White portion — grows from white's side of the board */}
       <div
         style={{
           position: 'absolute',
-          bottom: 0,
+          [whiteAnchor]: 0,
           width: '100%',
           height: `${whitePct}%`,
           background: '#f0f0f0',
