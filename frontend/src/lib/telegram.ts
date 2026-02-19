@@ -70,10 +70,13 @@ interface TelegramWebApp {
     selectionChanged: () => void;
   };
   openTelegramLink: (url: string) => void;
-  openLink: (url: string) => void;
+  openLink: (url: string, options?: { try_instant_view?: boolean }) => void;
   switchInlineQuery: (query: string, chatTypes?: string[]) => void;
+  sendData: (data: string) => void;
   setBackgroundColor: (color: string) => void;
   setHeaderColor: (color: string) => void;
+  showPopup: (params: { title?: string; message: string; buttons?: Array<{ id?: string; type?: string; text?: string }> }, callback?: (id: string) => void) => void;
+  showAlert: (message: string, callback?: () => void) => void;
 }
 
 declare global {
@@ -185,22 +188,33 @@ export function switchInlineQuery(query: string): void {
 }
 
 /**
- * Share a room invite. In Telegram — opens a share dialog via t.me link.
- * Outside Telegram — copies the browser URL to clipboard.
+ * Share a room invite link.
+ * In Telegram: uses switchInlineQuery to let user pick a chat.
+ * Fallback: copies the invite link to clipboard.
  */
 export function shareRoom(roomId: string): void {
   const { tgBotUsername, tgAppName } = config;
+  const wa = getWebApp();
 
-  if (isTelegram() && tgBotUsername && tgAppName) {
-    const link = `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`;
-    const text = 'Join my chess game!';
-    const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
-    getWebApp()!.openTelegramLink(shareUrl);
-  } else if (tgBotUsername && tgAppName) {
-    const link = `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`;
-    navigator.clipboard.writeText(link).catch(() => {});
+  if (wa && tgBotUsername) {
+    try {
+      wa.switchInlineQuery(roomId, ['users', 'groups', 'channels']);
+      return;
+    } catch {
+      // switchInlineQuery may not be supported — fall through
+    }
+  }
+
+  const inviteLink = (tgBotUsername && tgAppName)
+    ? `https://t.me/${tgBotUsername}/${tgAppName}?startapp=${roomId}`
+    : window.location.href;
+
+  if (wa) {
+    wa.showAlert(`Share this link:\n${inviteLink}`);
   } else {
-    navigator.clipboard.writeText(window.location.href).catch(() => {});
+    navigator.clipboard.writeText(inviteLink)
+      .then(() => alert('Link copied!'))
+      .catch(() => prompt('Copy this link:', inviteLink));
   }
 }
 
