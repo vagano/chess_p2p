@@ -151,29 +151,45 @@ export function hapticSelection(): void {
 
 // --- Main Button ---
 
+let _mainBtnHandler: (() => void) | null = null;
+
 export function showMainButton(text: string, onClick: () => void): void {
   const btn = getWebApp()?.MainButton;
   if (!btn) return;
+  if (_mainBtnHandler) btn.offClick(_mainBtnHandler);
+  _mainBtnHandler = onClick;
   btn.setText(text);
   btn.onClick(onClick);
   btn.show();
 }
 
 export function hideMainButton(): void {
-  getWebApp()?.MainButton?.hide();
+  const btn = getWebApp()?.MainButton;
+  if (!btn) return;
+  if (_mainBtnHandler) btn.offClick(_mainBtnHandler);
+  _mainBtnHandler = null;
+  btn.hide();
 }
 
 // --- Back Button ---
 
+let _backBtnHandler: (() => void) | null = null;
+
 export function showBackButton(onClick: () => void): void {
   const btn = getWebApp()?.BackButton;
   if (!btn) return;
+  if (_backBtnHandler) btn.offClick(_backBtnHandler);
+  _backBtnHandler = onClick;
   btn.onClick(onClick);
   btn.show();
 }
 
 export function hideBackButton(): void {
-  getWebApp()?.BackButton?.hide();
+  const btn = getWebApp()?.BackButton;
+  if (!btn) return;
+  if (_backBtnHandler) btn.offClick(_backBtnHandler);
+  _backBtnHandler = null;
+  btn.hide();
 }
 
 // --- Navigation / Sharing ---
@@ -216,14 +232,9 @@ export async function shareRoom(roomId: string): Promise<void> {
 
   console.log('[shareRoom] inTelegram:', inTelegram, 'link:', link);
 
-  if (inTelegram) {
-    // In TMA: copy to clipboard + alert (do NOT use navigator.share — it reloads the WebView)
-    try {
-      await navigator.clipboard.writeText(link);
-      wa!.showAlert('Link copied!\n\n' + link);
-    } catch {
-      wa!.showAlert(link);
-    }
+  if (inTelegram && wa) {
+    // In TMA: show alert with link (clipboard may not work in WebView)
+    wa.showAlert(link);
     return;
   }
 
