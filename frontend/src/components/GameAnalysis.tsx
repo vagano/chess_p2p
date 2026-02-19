@@ -118,13 +118,12 @@ export function GameAnalysis({ gameId, apiBaseUrl = config.apiBaseUrl }: GameAna
   return (
     <div
       style={{
-        background: '#fff',
-        borderRadius: '8px',
-        boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+        background: 'var(--tg-theme-secondary-bg-color, rgba(255,255,255,0.06))',
+        borderRadius: '10px',
         padding: '16px',
       }}
     >
-      <h3 style={{ margin: '0 0 12px', fontSize: '16px' }}>Game Analysis</h3>
+      <h3 style={{ margin: '0 0 12px', fontSize: '16px', color: 'var(--tg-theme-text-color, #e0e0e0)' }}>Game Analysis</h3>
 
       {/* Eval chart */}
       <svg
@@ -211,7 +210,7 @@ export function GameAnalysis({ gameId, apiBaseUrl = config.apiBaseUrl }: GameAna
               display: 'flex',
               gap: '8px',
               padding: '4px 8px',
-              borderBottom: '1px solid #f0f0f0',
+              borderBottom: '1px solid var(--tg-theme-secondary-bg-color, rgba(255,255,255,0.08))',
               alignItems: 'center',
             }}
           >

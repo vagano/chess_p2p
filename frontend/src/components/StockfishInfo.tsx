@@ -125,9 +125,8 @@ export function StockfishInfo({ evalResult, moveCount }: StockfishInfoProps) {
 
 const containerStyle: React.CSSProperties = {
   padding: '12px 14px',
-  background: 'var(--tg-theme-secondary-bg-color, #fff)',
-  borderRadius: '8px',
-  boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+  background: 'var(--tg-theme-secondary-bg-color, rgba(255,255,255,0.06))',
+  borderRadius: '10px',
 };
 
 const headerStyle: React.CSSProperties = {

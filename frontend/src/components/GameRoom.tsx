@@ -82,7 +82,7 @@ export function GameRoom() {
       const isMobile = window.innerWidth <= 600;
       if (isMobile) {
         const w = window.innerWidth - 16;
-        setBoardWidth(Math.max(240, Math.min(w, window.innerHeight * 0.55)));
+        setBoardWidth(Math.max(240, Math.min(w, window.innerHeight * 0.52)));
       } else {
         setBoardWidth(Math.min(window.innerWidth - 320, 560));
       }
@@ -164,16 +164,16 @@ export function GameRoom() {
     <div
       style={{
         minHeight: '100dvh',
-        background: 'var(--tg-theme-bg-color, #f5f5f5)',
-        color: 'var(--tg-theme-text-color, #333)',
+        background: 'var(--tg-theme-bg-color, #1a1a2e)',
+        color: 'var(--tg-theme-text-color, #e0e0e0)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: tgMode ? '4px 8px' : '12px',
-        paddingBottom: tgMode ? '80px' : '12px',
+        padding: tgMode ? '4px 8px' : '16px',
+        paddingBottom: tgMode ? '80px' : '16px',
       }}
     >
-      {/* Header — hidden in TMA (Telegram has its own) */}
+      {/* Header — browser mode only */}
       {!tgMode && (
         <div
           style={{
@@ -191,17 +191,17 @@ export function GameRoom() {
             <button
               onClick={handleShareRoom}
               style={{
-                padding: '8px 16px',
-                borderRadius: '20px',
+                padding: '6px 14px',
+                borderRadius: '16px',
                 border: 'none',
-                background: 'var(--tg-theme-button-color, #1976d2)',
+                background: 'var(--tg-theme-button-color, #5865f2)',
                 color: 'var(--tg-theme-button-text-color, #fff)',
                 cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: 500,
+                fontSize: '12px',
+                fontWeight: 600,
               }}
             >
-              Copy Link
+              Share
             </button>
           </div>
         </div>
@@ -214,12 +214,9 @@ export function GameRoom() {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          padding: '4px 0',
-          fontSize: '12px',
-          color: 'var(--tg-theme-hint-color, #888)',
+          padding: '2px 0 6px',
         }}>
           <ConnectionStatus state={connectionState} peerCount={peerCount} />
-          <span>{playerColor || 'spectator'}</span>
         </div>
       )}
 
@@ -258,13 +255,13 @@ export function GameRoom() {
         <div
           className="game-sidebar"
           style={{
-            width: '250px',
+            width: tgMode ? '100%' : '250px',
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
           }}
         >
-          {/* Mobile eval bar — horizontal, below board */}
+          {/* Mobile eval — compact bar below board */}
           <div className="eval-bar-mobile">
             <StockfishInfo
               evalResult={evalResult}
@@ -288,19 +285,18 @@ export function GameRoom() {
             />
           </div>
 
-          {/* Room info — compact in TMA */}
+          {/* Room info — browser only */}
           {!tgMode && (
             <div
               style={{
                 padding: '10px 14px',
-                background: 'var(--tg-theme-secondary-bg-color, #fff)',
-                borderRadius: '8px',
-                boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
+                background: 'var(--tg-theme-secondary-bg-color, rgba(255,255,255,0.06))',
+                borderRadius: '10px',
                 fontSize: '12px',
                 color: 'var(--tg-theme-hint-color, #888)',
               }}
             >
-              <div>Room: <code>{roomId}</code></div>
+              <div>Room: <code style={{ color: 'var(--tg-theme-text-color, #e0e0e0)' }}>{roomId}</code></div>
               <div style={{ marginTop: '4px' }}>
                 Transport: {isP2P ? 'P2P' : connectionState === 'WS_CONNECTED' ? 'WS' : connectionState === 'WS_FALLBACK' ? 'WS Fallback' : '...'}
               </div>

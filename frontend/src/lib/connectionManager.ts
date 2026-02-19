@@ -19,8 +19,8 @@ export interface ConnectionManagerOptions {
   mode: ConnectionMode;
   signalingServers: string[];
   wsServerUrl: string;
-  p2pTimeout?: number;       // ms to wait for P2P before fallback (default 10000)
-  p2pRetryInterval?: number; // ms between P2P retry attempts in WS_FALLBACK (default 30000)
+  p2pTimeout?: number;
+  p2pRetryInterval?: number;
   onStateChange?: (state: ConnectionState) => void;
   onPeerCountChange?: (count: number) => void;
 }
@@ -54,12 +54,20 @@ export class ConnectionManager {
     this.onPeerCountChange = options.onPeerCountChange;
   }
 
-  /** Append initData to a WS URL for server-side auth */
-  private authWsUrl(base: string): string {
+  /** Build auth query params for y-websocket provider */
+  private wsAuthParams(): Record<string, string> {
     const initData = getInitData();
-    if (!initData) return base;
-    const sep = base.includes('?') ? '&' : '?';
-    return `${base}${sep}initData=${encodeURIComponent(initData)}`;
+    return initData ? { initData } : {};
+  }
+
+  /** Append initData query param to a signaling URL (used as-is by y-webrtc) */
+  private authSignalingUrls(): string[] {
+    const initData = getInitData();
+    if (!initData) return this.signalingServers;
+    return this.signalingServers.map((url) => {
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}initData=${encodeURIComponent(initData)}`;
+    });
   }
 
   get currentState(): ConnectionState {
@@ -86,8 +94,6 @@ export class ConnectionManager {
     }
   }
 
-  // ─── Public API ────────────────────────────────────────────
-
   connect(): void {
     if (this.destroyed) return;
 
@@ -105,25 +111,22 @@ export class ConnectionManager {
     }
   }
 
-  /** Force sync with server (used in P2P mode for periodic validation) */
   syncWithServer(): Promise<void> {
-    // In websocket mode, always connected — no-op
     if (this.mode === 'websocket') return Promise.resolve();
 
     return new Promise((resolve) => {
       if (!this.wsProvider) {
         this.wsProvider = new WebsocketProvider(
-          this.authWsUrl(this.wsServerUrl),
+          this.wsServerUrl,
           this.roomId,
           this.doc,
-          { connect: false }
+          { connect: false, params: this.wsAuthParams() }
         );
       }
 
       const onSync = (synced: boolean) => {
         if (synced) {
           this.wsProvider?.off('sync', onSync);
-          // Disconnect after sync if in P2P mode
           if (this.state === 'P2P_CONNECTED') {
             setTimeout(() => {
               this.wsProvider?.disconnect();
@@ -138,7 +141,6 @@ export class ConnectionManager {
       this.wsProvider.on('sync', onSync);
       this.wsProvider.connect();
 
-      // Timeout for sync
       setTimeout(() => {
         if (this.state === 'P2P_CONNECTED') {
           this.wsProvider?.disconnect();
@@ -168,7 +170,7 @@ export class ConnectionManager {
     this.setState('P2P_CONNECTING');
 
     this.webrtcProvider = new WebrtcProvider(this.roomId, this.doc, {
-      signaling: this.signalingServers,
+      signaling: this.authSignalingUrls(),
     });
 
     this.webrtcProvider.on('peers', (event: { webrtcPeers: string[]; bcPeers: string[] }) => {
@@ -186,8 +188,6 @@ export class ConnectionManager {
         this.setState('P2P_CONNECTED');
       }
     });
-
-    // No fallback — just stay in P2P_CONNECTING until peers arrive
   }
 
   // ─── Mode: WebSocket only ─────────────────────────────────
@@ -196,9 +196,10 @@ export class ConnectionManager {
     this.setState('WS_CONNECTING');
 
     this.wsProvider = new WebsocketProvider(
-      this.authWsUrl(this.wsServerUrl),
+      this.wsServerUrl,
       this.roomId,
       this.doc,
+      { params: this.wsAuthParams() },
     );
 
     this.wsProvider.on('status', (event: { status: string }) => {
@@ -226,7 +227,7 @@ export class ConnectionManager {
     this.setState('P2P_CONNECTING');
 
     this.webrtcProvider = new WebrtcProvider(this.roomId, this.doc, {
-      signaling: this.signalingServers,
+      signaling: this.authSignalingUrls(),
     });
 
     this.webrtcProvider.on('peers', (event: { webrtcPeers: string[]; bcPeers: string[] }) => {
@@ -245,7 +246,6 @@ export class ConnectionManager {
       }
     });
 
-    // Set timeout for P2P connection → fallback to WS
     this.p2pTimeoutTimer = setTimeout(() => {
       if (this.state === 'P2P_CONNECTING') {
         console.log('[ConnectionManager] P2P timeout, falling back to WebSocket');
@@ -260,7 +260,6 @@ export class ConnectionManager {
       this.p2pTimeoutTimer = null;
     }
 
-    // If we were on WS fallback, disconnect WS
     if (this.wsProvider) {
       console.log('[ConnectionManager] P2P restored, disconnecting WebSocket');
       this.wsProvider.disconnect();
@@ -279,10 +278,10 @@ export class ConnectionManager {
 
     if (!this.wsProvider) {
       this.wsProvider = new WebsocketProvider(
-        this.authWsUrl(this.wsServerUrl),
+        this.wsServerUrl,
         this.roomId,
         this.doc,
-        { connect: false }
+        { connect: false, params: this.wsAuthParams() }
       );
 
       this.wsProvider.on('status', (event: { status: string }) => {
@@ -301,7 +300,6 @@ export class ConnectionManager {
 
     this.wsProvider.connect();
 
-    // Periodically try to restore P2P
     this.p2pRetryTimer = setInterval(() => {
       if (this.destroyed) return;
       if (this.state === 'WS_FALLBACK') {
