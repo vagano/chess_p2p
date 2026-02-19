@@ -1,33 +1,38 @@
 {$DOMAIN} {
 	# ── WebSocket: y-websocket ──
 	@ws path /ws/*
-	reverse_proxy @ws frontend:80
+	reverse_proxy @ws backend:8080
 
 	# ── WebSocket: y-webrtc signaling ──
 	@signaling path /signaling
-	reverse_proxy @signaling frontend:80
+	reverse_proxy @signaling backend:8080
 
 	# ── REST API ──
 	@api path /api/*
-	reverse_proxy @api frontend:80
+	reverse_proxy @api backend:8080
 
 	# ── Health check ──
 	@health path /health
-	reverse_proxy @health frontend:80
+	reverse_proxy @health backend:8080
 
 	# ── Telegram Bot webhook ──
-	@webhook path /bot/webhook
-	reverse_proxy @webhook frontend:80
+	@webhook path /bot/*
+	reverse_proxy @webhook backend:8080
 
-	# ── Frontend SPA (default) ──
-	reverse_proxy frontend:80
+	# ── config.js — no cache (runtime-injected) ──
+	@configjs path /config.js
+	header @configjs Cache-Control "no-store, no-cache, must-revalidate"
 
-	# Pass real client IP
-	header_up X-Real-IP {remote_host}
-	header_up X-Forwarded-For {remote_host}
-	header_up X-Forwarded-Proto {scheme}
+	# ── Static assets — long cache ──
+	@static path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
+	header @static Cache-Control "public, max-age=31536000, immutable"
 
-	# Security headers
+	# ── SPA: serve files, fallback to index.html ──
+	root * /srv
+	try_files {path} /index.html
+	file_server
+
+	# ── Security headers ──
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options SAMEORIGIN
@@ -35,6 +40,5 @@
 		-Server
 	}
 
-	# Gzip
 	encode gzip
 }

@@ -56,19 +56,20 @@ services:
     networks:
       - internal
 
-  # ── Frontend (Nginx serves SPA, proxies to backend) ─────────
-  frontend:
-    build: ./frontend
-    container_name: p2p_chess_frontend
-    restart: unless-stopped
+  # ── Frontend build (init container) ─────────────────────────
+  # Builds React SPA, generates config.js, copies to shared volume.
+  # Runs once and exits.
+  frontend-init:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: p2p_chess_frontend_init
     environment:
       CONNECTION_MODE: "hybrid"
-    depends_on:
-      - backend
-    networks:
-      - internal
+    volumes:
+      - frontend_dist:/srv
 
-  # ── Caddy (TLS termination + reverse proxy) ─────────────────
+  # ── Caddy (TLS + static files + reverse proxy) ─────────────
   caddy:
     image: caddy:2-alpine
     container_name: p2p_chess_caddy
@@ -77,17 +78,24 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - frontend_dist:/srv:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - frontend
+      frontend-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
     networks:
       - internal
 
 volumes:
   pgdata:
+  frontend_dist:
   caddy_data:
   caddy_config:
 
