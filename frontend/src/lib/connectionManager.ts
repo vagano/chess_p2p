@@ -2,7 +2,6 @@ import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
 import { WebsocketProvider } from 'y-websocket';
 import type { ConnectionMode } from './config';
-import { getInitData } from './telegram';
 
 export type ConnectionState =
   | 'P2P_CONNECTING'
@@ -54,20 +53,13 @@ export class ConnectionManager {
     this.onPeerCountChange = options.onPeerCountChange;
   }
 
-  /** Build auth query params for y-websocket provider */
+  /** WS/signaling endpoints are public — no auth params needed */
   private wsAuthParams(): Record<string, string> {
-    const initData = getInitData();
-    return initData ? { initData } : {};
+    return {};
   }
 
-  /** Append initData query param to a signaling URL (used as-is by y-webrtc) */
   private authSignalingUrls(): string[] {
-    const initData = getInitData();
-    if (!initData) return this.signalingServers;
-    return this.signalingServers.map((url) => {
-      const sep = url.includes('?') ? '&' : '?';
-      return `${url}${sep}initData=${encodeURIComponent(initData)}`;
-    });
+    return this.signalingServers;
   }
 
   get currentState(): ConnectionState {
