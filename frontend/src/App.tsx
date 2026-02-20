@@ -10,6 +10,11 @@ export function persistRoom(roomId: string): void {
   try { sessionStorage.setItem(ROOM_KEY, roomId); } catch { /* noop */ }
 }
 
+/** Clear persisted room so Back button can navigate to Home */
+export function clearPersistedRoom(): void {
+  try { sessionStorage.removeItem(ROOM_KEY); } catch { /* noop */ }
+}
+
 function StartParamRedirect() {
   const startParam = getStartParam();
   console.log('[StartParamRedirect] start_param:', startParam);

@@ -114,7 +114,7 @@ export class ConnectionManager {
           this.wsServerUrl,
           this.roomId,
           this.doc,
-          { connect: false, params: {} }
+          { connect: false, params: {}, resyncInterval: 20000 }
         );
       }
 
@@ -271,7 +271,7 @@ export class ConnectionManager {
         this.wsServerUrl,
         this.roomId,
         this.doc,
-        { connect: false, params: {} }
+        { connect: false, params: {}, resyncInterval: 20000 }
       );
 
       this.wsProvider.on('status', (event: { status: string }) => {

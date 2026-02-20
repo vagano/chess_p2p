@@ -15,7 +15,7 @@ import {
   syncSeatingToGameMap,
   getPlayersMap,
 } from '../lib/gameState';
-import { persistRoom } from '../App';
+import { persistRoom, clearPersistedRoom } from '../App';
 import { fetchEvaluation, type EvalResult } from '../lib/evaluation';
 import { config } from '../lib/config';
 import {
@@ -200,7 +200,10 @@ export function GameRoom() {
 
   useEffect(() => {
     if (!tgMode) return;
-    const goBack = () => navigate('/');
+    const goBack = () => {
+      clearPersistedRoom();
+      navigate('/');
+    };
     showBackButton(goBack);
     return () => hideBackButton();
   }, [navigate]);
