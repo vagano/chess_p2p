@@ -306,8 +306,12 @@ export class ConnectionManager {
         this.log(`WS ERROR: ${(event as ErrorEvent).message || 'unknown error'}`);
       });
 
-      this.wsProvider.on('connection-close', (event: CloseEvent) => {
-        this.log(`WS CLOSE: code=${event.code} reason="${event.reason}" clean=${event.wasClean}`);
+      this.wsProvider.on('connection-close', (event: CloseEvent | null) => {
+        if (event) {
+          this.log(`WS CLOSE: code=${event.code} reason="${event.reason}" clean=${event.wasClean}`);
+        } else {
+          this.log('WS CLOSE: event=null');
+        }
       });
     }
 
