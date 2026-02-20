@@ -222,7 +222,7 @@ function buildInviteLink(roomId: string, forTelegram: boolean): string {
 
 /**
  * Share a room invite link.
- * In Telegram: copies t.me deep link to clipboard (navigator.share causes WebView reload).
+ * In Telegram: show popup with link + copy button.
  * In browser: native share or clipboard.
  */
 export async function shareRoom(roomId: string): Promise<void> {
@@ -233,8 +233,29 @@ export async function shareRoom(roomId: string): Promise<void> {
   console.log('[shareRoom] inTelegram:', inTelegram, 'link:', link);
 
   if (inTelegram && wa) {
-    // In TMA: show alert with link (clipboard may not work in WebView)
-    wa.showAlert(link);
+    try {
+      await navigator.clipboard.writeText(link);
+    } catch { /* ignore clipboard errors in WebView */ }
+
+    wa.showPopup(
+      {
+        title: 'Invite Link',
+        message: link,
+        buttons: [
+          { id: 'send', type: 'default', text: 'Send to Chat' },
+          { id: 'ok', type: 'close' },
+        ],
+      },
+      (btnId: string) => {
+        if (btnId === 'send') {
+          try {
+            wa.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('Join my chess game!')}`);
+          } catch (e) {
+            console.warn('[shareRoom] openTelegramLink failed:', e);
+          }
+        }
+      },
+    );
     return;
   }
 

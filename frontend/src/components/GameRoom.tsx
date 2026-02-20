@@ -32,6 +32,66 @@ import {
 
 const tgMode = isTelegram();
 
+interface DiagResult {
+  http: string;
+  ws: string;
+  sig: string;
+  err: string;
+}
+
+async function runConnectionDiag(wsUrl: string, sigUrl: string, apiBase: string): Promise<DiagResult> {
+  const result: DiagResult = { http: '...', ws: '...', sig: '...', err: '' };
+
+  // 1) HTTP health check
+  try {
+    const resp = await fetch(`${apiBase}/health`, { signal: AbortSignal.timeout(5000) });
+    result.http = resp.ok ? `OK ${resp.status}` : `FAIL ${resp.status}`;
+  } catch (e: unknown) {
+    result.http = `ERR: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  // 2) Raw WebSocket to /ws/diag-test
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const url = `${wsUrl}/diag-test-${Date.now()}`;
+      const socket = new WebSocket(url);
+      const timer = setTimeout(() => { socket.close(); reject(new Error('timeout 5s')); }, 5000);
+      socket.onopen = () => { clearTimeout(timer); result.ws = 'OPEN'; socket.close(); resolve(); };
+      socket.onerror = () => { clearTimeout(timer); reject(new Error('onerror')); };
+      socket.onclose = (ev) => {
+        clearTimeout(timer);
+        if (result.ws !== 'OPEN') reject(new Error(`closed ${ev.code} ${ev.reason || 'no reason'}`));
+      };
+    });
+  } catch (e: unknown) {
+    result.ws = `ERR: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  // 3) Raw WebSocket to /signaling
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const socket = new WebSocket(sigUrl);
+      const timer = setTimeout(() => { socket.close(); reject(new Error('timeout 5s')); }, 5000);
+      socket.onopen = () => {
+        clearTimeout(timer);
+        result.sig = 'OPEN';
+        socket.send(JSON.stringify({ type: 'ping' }));
+        setTimeout(() => socket.close(), 200);
+        resolve();
+      };
+      socket.onerror = () => { clearTimeout(timer); reject(new Error('onerror')); };
+      socket.onclose = (ev) => {
+        clearTimeout(timer);
+        if (result.sig !== 'OPEN') reject(new Error(`closed ${ev.code} ${ev.reason || 'no reason'}`));
+      };
+    });
+  } catch (e: unknown) {
+    result.sig = `ERR: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  return result;
+}
+
 export function GameRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -58,6 +118,8 @@ export function GameRoom() {
   const [evalResult, setEvalResult] = useState<EvalResult | null>(null);
   const [boardWidth, setBoardWidth] = useState(480);
   const evalAbortRef = useRef<AbortController | null>(null);
+  const [diag, setDiag] = useState<DiagResult | null>(null);
+  const [diagRunning, setDiagRunning] = useState(false);
 
   const [playerColor, setPlayerColor] = useState<'white' | 'black' | null>(null);
 
@@ -244,6 +306,37 @@ export function GameRoom() {
             <div>ws: {config.wsServerUrl}</div>
             <div>sig: {config.signalingServers[0]}</div>
             <div>mode: {config.connectionMode}</div>
+            <div>origin: {window.location.origin}</div>
+            <div style={{ marginTop: '4px' }}>
+              <button
+                disabled={diagRunning}
+                onClick={() => {
+                  setDiagRunning(true);
+                  runConnectionDiag(config.wsServerUrl, config.signalingServers[0], config.apiBaseUrl)
+                    .then(r => { setDiag(r); setDiagRunning(false); })
+                    .catch(() => setDiagRunning(false));
+                }}
+                style={{
+                  fontSize: '9px',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'rgba(255,255,255,0.1)',
+                  color: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                {diagRunning ? 'Testing...' : 'Run Network Test'}
+              </button>
+            </div>
+            {diag && (
+              <div style={{ marginTop: '4px' }}>
+                <div>HTTP /health: <b style={{ color: diag.http.startsWith('OK') ? '#66bb6a' : '#ef5350' }}>{diag.http}</b></div>
+                <div>WS /ws: <b style={{ color: diag.ws === 'OPEN' ? '#66bb6a' : '#ef5350' }}>{diag.ws}</b></div>
+                <div>SIG /signaling: <b style={{ color: diag.sig === 'OPEN' ? '#66bb6a' : '#ef5350' }}>{diag.sig}</b></div>
+                {diag.err && <div>err: {diag.err}</div>}
+              </div>
+            )}
           </div>
         </div>
       )}
