@@ -14,7 +14,15 @@ export function getPool(): pg.Pool | null {
   }
 
   try {
-    pool = new Pool({ connectionString: url, max: 10 });
+    pool = new Pool({
+      connectionString: url,
+      max: 10,
+      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 30000,
+    });
+    pool.on('error', (err) => {
+      console.error('[DB] Pool background error:', err.message);
+    });
     console.log('[DB] PostgreSQL pool created');
     return pool;
   } catch (err) {
@@ -69,11 +77,14 @@ export async function updateGameState(
   const p = getPool();
   if (!p) return;
 
+  const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(gameId);
+  if (!isUUID) return;
+
   await p.query(
     `UPDATE games SET fen = $2, pgn = $3, status = $4, result = $5, updated_at = NOW()
      WHERE id = $1::uuid`,
     [gameId, fen, pgn, status, result],
-  ).catch(() => {
-    // Game may not exist yet or gameId is not a UUID
+  ).catch((err) => {
+    console.error(`[DB] updateGameState error for ${gameId}:`, err.message);
   });
 }

@@ -13,7 +13,12 @@ export async function onChange(data: onChangePayload): Promise<void> {
   const gameMap = document.getMap('game');
   const pending = gameMap.get('pendingMove') as PendingMove | null;
 
-  if (!pending) return;
+  if (!pending) {
+    console.log(`[onChange] doc="${documentName}" pendingMove=null (no-op)`);
+    return;
+  }
+
+  console.log(`[onChange] doc="${documentName}" pending=${JSON.stringify(pending)}`);
 
   const moves = (gameMap.get('moves') as string[]) || [];
   const status = gameMap.get('status') as string;

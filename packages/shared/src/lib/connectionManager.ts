@@ -1,5 +1,5 @@
 import * as Y from 'yjs';
-import { WebsocketProvider } from 'y-websocket';
+import { HocuspocusProvider } from '@hocuspocus/provider';
 import type { ConnectionMode } from '../types';
 
 export type ConnectionState =
@@ -24,23 +24,12 @@ export interface ConnectionManagerOptions {
   onLog?: (entry: string) => void;
 }
 
-/**
- * Manages Yjs document connections.
- *
- * Supports three modes:
- * - 'websocket': WS only (TMA, rated games)
- * - 'p2p': WebRTC only (requires y-webrtc, caller must provide WebrtcProvider)
- * - 'hybrid': P2P primary with WS fallback
- *
- * P2P functionality requires the consuming app to supply a WebrtcProvider
- * via `attachWebrtcProvider()` since y-webrtc is an optional dependency.
- */
 export class ConnectionManager {
   private doc: Y.Doc;
   private roomId: string;
   private mode: ConnectionMode;
   private webrtcProvider: { destroy(): void; awareness: { getStates(): Map<number, unknown> }; on(event: string, cb: (...args: unknown[]) => void): void } | null = null;
-  private wsProvider: WebsocketProvider | null = null;
+  private wsProvider: HocuspocusProvider | null = null;
   private state: ConnectionState = 'DISCONNECTED';
   private p2pTimeout: number;
   private p2pRetryInterval: number;
@@ -97,10 +86,6 @@ export class ConnectionManager {
     }
   }
 
-  /**
-   * Attach an external WebrtcProvider for P2P modes.
-   * Called by apps that include y-webrtc (e.g. web app).
-   */
   attachWebrtcProvider(provider: ConnectionManager['webrtcProvider']): void {
     this.webrtcProvider = provider;
   }
@@ -124,24 +109,19 @@ export class ConnectionManager {
   }
 
   syncWithServer(): Promise<void> {
-    if (this.wsProvider?.wsconnected) return Promise.resolve();
+    if (this.wsProvider?.isSynced) return Promise.resolve();
 
     return new Promise((resolve) => {
       if (!this.wsProvider) {
         this.createWSProvider();
-      } else {
-        this.wsProvider.connect();
       }
 
-      const onSync = (synced: boolean) => {
-        if (synced) {
-          this.wsProvider?.off('sync', onSync);
-          resolve();
-        }
+      const onSynced = () => {
+        this.wsProvider?.off('synced', onSynced);
+        resolve();
       };
 
-      this.wsProvider!.on('sync', onSync);
-
+      this.wsProvider!.on('synced', onSynced);
       setTimeout(() => resolve(), 5000);
     });
   }
@@ -247,52 +227,46 @@ export class ConnectionManager {
   }
 
   private createWSProvider(): void {
-    const url = `${this.wsServerUrl}/${encodeURIComponent(this.roomId)}`;
-    this.log(`WS target: ${url}`);
+    this.log(`WS target: ${this.wsServerUrl} doc="${this.roomId}"`);
 
     if (!this.wsProvider) {
-      this.wsProvider = new WebsocketProvider(
-        this.wsServerUrl,
-        this.roomId,
-        this.doc,
-        { connect: false, params: {}, resyncInterval: 20000 },
-      );
+      this.wsProvider = new HocuspocusProvider({
+        url: this.wsServerUrl,
+        name: this.roomId,
+        document: this.doc,
+        token: null,
+        forceSyncInterval: 20000,
+        onStatus: ({ status }: { status: string }) => {
+          if (this.destroyed) return;
+          this.log(`WS status: ${status}`);
 
-      this.wsProvider.on('status', (event: { status: string }) => {
-        if (this.destroyed) return;
-        this.log(`WS status: ${event.status}`);
-
-        if (event.status === 'connected') {
-          if (this.state === 'WS_CONNECTING') this.setState('WS_CONNECTED');
-        } else if (event.status === 'disconnected') {
-          if (this.state === 'WS_CONNECTED') {
-            this.setState('RECONNECTING');
+          if (status === 'connected') {
+            if (this.state === 'WS_CONNECTING' || this.state === 'RECONNECTING') {
+              this.setState('WS_CONNECTED');
+            }
+          } else if (status === 'disconnected') {
+            if (this.state === 'WS_CONNECTED') {
+              this.setState('RECONNECTING');
+            }
           }
-        }
-      });
-
-      this.wsProvider.on('sync', (synced: boolean) => {
-        if (this.destroyed) return;
-        this.log(`WS sync: ${synced}`);
-        if (synced && this.state === 'WS_CONNECTING') {
-          this.setState('WS_CONNECTED');
-        }
-      });
-
-      this.wsProvider.on('connection-error', (event: Event) => {
-        this.log(`WS ERROR: ${(event as ErrorEvent).message || 'unknown error'}`);
-      });
-
-      this.wsProvider.on('connection-close', (event: CloseEvent | null) => {
-        if (event) {
-          this.log(`WS CLOSE: code=${event.code} reason="${event.reason}" clean=${event.wasClean}`);
-        } else {
-          this.log('WS CLOSE: event=null');
-        }
+        },
+        onSynced: ({ state }: { state: boolean }) => {
+          if (this.destroyed) return;
+          this.log(`WS synced: ${state}`);
+          if (state && this.state === 'WS_CONNECTING') {
+            this.setState('WS_CONNECTED');
+          }
+        },
+        onClose: ({ event }: { event: { code?: number; reason?: string } }) => {
+          if (this.destroyed) return;
+          this.log(`WS CLOSE: code=${event?.code} reason="${event?.reason}"`);
+        },
+        onDisconnect: () => {
+          if (this.destroyed) return;
+          this.log('WS DISCONNECT');
+        },
       });
     }
-
-    this.wsProvider.connect();
   }
 
   private tryRestoreP2P(): void {

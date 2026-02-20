@@ -19,11 +19,27 @@ CREATE TABLE IF NOT EXISTS games (
 );
 
 CREATE TABLE IF NOT EXISTS yjs_snapshots (
-    game_id UUID PRIMARY KEY REFERENCES games(id) ON DELETE CASCADE,
+    game_id TEXT PRIMARY KEY,
     snapshot BYTEA NOT NULL,
     state_vector BYTEA NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migrate yjs_snapshots.game_id from UUID to TEXT if needed
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'yjs_snapshots' AND column_name = 'game_id'
+          AND data_type = 'uuid'
+    ) THEN
+        -- Drop FK constraint if exists
+        ALTER TABLE yjs_snapshots DROP CONSTRAINT IF EXISTS yjs_snapshots_game_id_fkey;
+        -- Change type from UUID to TEXT
+        ALTER TABLE yjs_snapshots ALTER COLUMN game_id TYPE TEXT USING game_id::TEXT;
+        RAISE NOTICE 'Migrated yjs_snapshots.game_id from UUID to TEXT';
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS move_analysis (
     id SERIAL PRIMARY KEY,
