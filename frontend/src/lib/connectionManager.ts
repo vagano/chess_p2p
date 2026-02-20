@@ -22,6 +22,7 @@ export interface ConnectionManagerOptions {
   p2pRetryInterval?: number;
   onStateChange?: (state: ConnectionState) => void;
   onPeerCountChange?: (count: number) => void;
+  onLog?: (entry: string) => void;
 }
 
 export class ConnectionManager {
@@ -39,6 +40,7 @@ export class ConnectionManager {
   private wsServerUrl: string;
   private onStateChange?: (state: ConnectionState) => void;
   private onPeerCountChange?: (count: number) => void;
+  private onLog?: (entry: string) => void;
   private destroyed = false;
 
   constructor(options: ConnectionManagerOptions) {
@@ -51,15 +53,14 @@ export class ConnectionManager {
     this.p2pRetryInterval = options.p2pRetryInterval ?? 30000;
     this.onStateChange = options.onStateChange;
     this.onPeerCountChange = options.onPeerCountChange;
+    this.onLog = options.onLog;
   }
 
-  /** WS/signaling endpoints are public — no auth params needed */
-  private wsAuthParams(): Record<string, string> {
-    return {};
-  }
-
-  private authSignalingUrls(): string[] {
-    return this.signalingServers;
+  private log(msg: string): void {
+    const ts = new Date().toLocaleTimeString('en-GB', { hour12: false });
+    const entry = `${ts} ${msg}`;
+    console.log(`[CM] ${entry}`);
+    this.onLog?.(entry);
   }
 
   get currentState(): ConnectionState {
@@ -80,7 +81,7 @@ export class ConnectionManager {
 
   private setState(newState: ConnectionState): void {
     if (this.state !== newState) {
-      console.log(`[ConnectionManager] ${this.state} -> ${newState}`);
+      this.log(`state: ${this.state} → ${newState}`);
       this.state = newState;
       this.onStateChange?.(newState);
     }
@@ -88,6 +89,7 @@ export class ConnectionManager {
 
   connect(): void {
     if (this.destroyed) return;
+    this.log(`connect() mode=${this.mode} room=${this.roomId}`);
 
     switch (this.mode) {
       case 'p2p':
@@ -112,7 +114,7 @@ export class ConnectionManager {
           this.wsServerUrl,
           this.roomId,
           this.doc,
-          { connect: false, params: this.wsAuthParams() }
+          { connect: false, params: {} }
         );
       }
 
@@ -162,7 +164,7 @@ export class ConnectionManager {
     this.setState('P2P_CONNECTING');
 
     this.webrtcProvider = new WebrtcProvider(this.roomId, this.doc, {
-      signaling: this.authSignalingUrls(),
+      signaling: this.signalingServers,
     });
 
     this.webrtcProvider.on('peers', (event: { webrtcPeers: string[]; bcPeers: string[] }) => {
@@ -186,27 +188,7 @@ export class ConnectionManager {
 
   private connectWSOnly(): void {
     this.setState('WS_CONNECTING');
-
-    this.wsProvider = new WebsocketProvider(
-      this.wsServerUrl,
-      this.roomId,
-      this.doc,
-      { params: this.wsAuthParams() },
-    );
-
-    this.wsProvider.on('status', (event: { status: string }) => {
-      if (this.destroyed) return;
-      if (event.status === 'connected') {
-        this.setState('WS_CONNECTED');
-      } else if (event.status === 'disconnected') {
-        this.setState('RECONNECTING');
-      }
-    });
-
-    this.wsProvider.on('sync', (synced: boolean) => {
-      if (this.destroyed) return;
-      if (synced) this.setState('WS_CONNECTED');
-    });
+    this.createWSProvider(true);
   }
 
   // ─── Mode: Hybrid (P2P primary, WS fallback) ──────────────
@@ -217,14 +199,16 @@ export class ConnectionManager {
 
   private startP2P(): void {
     this.setState('P2P_CONNECTING');
+    this.log(`WebRTC signaling: ${this.signalingServers.join(', ')}`);
 
     this.webrtcProvider = new WebrtcProvider(this.roomId, this.doc, {
-      signaling: this.authSignalingUrls(),
+      signaling: this.signalingServers,
     });
 
     this.webrtcProvider.on('peers', (event: { webrtcPeers: string[]; bcPeers: string[] }) => {
       if (this.destroyed) return;
       const total = event.webrtcPeers.length + event.bcPeers.length;
+      this.log(`peers: webrtc=${event.webrtcPeers.length} bc=${event.bcPeers.length}`);
       this.onPeerCountChange?.(total);
       if (total > 0 && this.state === 'P2P_CONNECTING') {
         this.onP2PConnected();
@@ -233,6 +217,7 @@ export class ConnectionManager {
 
     this.webrtcProvider.on('synced', () => {
       if (this.destroyed) return;
+      this.log('WebRTC synced');
       if (this.state === 'P2P_CONNECTING') {
         this.onP2PConnected();
       }
@@ -240,7 +225,7 @@ export class ConnectionManager {
 
     this.p2pTimeoutTimer = setTimeout(() => {
       if (this.state === 'P2P_CONNECTING') {
-        console.log('[ConnectionManager] P2P timeout, falling back to WebSocket');
+        this.log('P2P timeout → WS fallback');
         this.activateWSFallback();
       }
     }, this.p2pTimeout);
@@ -253,7 +238,7 @@ export class ConnectionManager {
     }
 
     if (this.wsProvider) {
-      console.log('[ConnectionManager] P2P restored, disconnecting WebSocket');
+      this.log('P2P restored, disconnecting WS');
       this.wsProvider.disconnect();
     }
 
@@ -267,30 +252,7 @@ export class ConnectionManager {
 
   private activateWSFallback(): void {
     this.setState('WS_FALLBACK');
-
-    if (!this.wsProvider) {
-      this.wsProvider = new WebsocketProvider(
-        this.wsServerUrl,
-        this.roomId,
-        this.doc,
-        { connect: false, params: this.wsAuthParams() }
-      );
-
-      this.wsProvider.on('status', (event: { status: string }) => {
-        if (this.destroyed) return;
-        console.log(`[ConnectionManager] WebSocket status: ${event.status}`);
-        if (event.status === 'disconnected' && this.state === 'WS_FALLBACK') {
-          this.setState('RECONNECTING');
-          setTimeout(() => {
-            if (this.state === 'RECONNECTING' && this.wsProvider) {
-              this.wsProvider.connect();
-            }
-          }, 2000);
-        }
-      });
-    }
-
-    this.wsProvider.connect();
+    this.createWSProvider(false);
 
     this.p2pRetryTimer = setInterval(() => {
       if (this.destroyed) return;
@@ -298,6 +260,62 @@ export class ConnectionManager {
         this.tryRestoreP2P();
       }
     }, this.p2pRetryInterval);
+  }
+
+  private createWSProvider(autoConnect: boolean): void {
+    const url = `${this.wsServerUrl}/${encodeURIComponent(this.roomId)}`;
+    this.log(`WS target: ${url}`);
+
+    if (!this.wsProvider) {
+      this.wsProvider = new WebsocketProvider(
+        this.wsServerUrl,
+        this.roomId,
+        this.doc,
+        { connect: false, params: {} }
+      );
+
+      this.wsProvider.on('status', (event: { status: string }) => {
+        if (this.destroyed) return;
+        this.log(`WS status: ${event.status}`);
+
+        if (event.status === 'connected') {
+          if (this.state === 'WS_CONNECTING') this.setState('WS_CONNECTED');
+        } else if (event.status === 'disconnected') {
+          if (this.state === 'WS_FALLBACK' || this.state === 'WS_CONNECTED') {
+            this.setState('RECONNECTING');
+            setTimeout(() => {
+              if (!this.destroyed && this.state === 'RECONNECTING' && this.wsProvider) {
+                this.log('WS reconnecting...');
+                this.wsProvider.connect();
+              }
+            }, 2000);
+          }
+        }
+      });
+
+      this.wsProvider.on('sync', (synced: boolean) => {
+        if (this.destroyed) return;
+        this.log(`WS sync: ${synced}`);
+        if (synced && this.state === 'WS_CONNECTING') {
+          this.setState('WS_CONNECTED');
+        }
+      });
+
+      // Capture connection errors and close events
+      this.wsProvider.on('connection-error', (event: Event) => {
+        this.log(`WS ERROR: ${(event as ErrorEvent).message || 'unknown error'}`);
+      });
+
+      this.wsProvider.on('connection-close', (event: CloseEvent) => {
+        this.log(`WS CLOSE: code=${event.code} reason="${event.reason}" clean=${event.wasClean}`);
+      });
+    }
+
+    if (autoConnect) {
+      this.wsProvider.connect();
+    } else {
+      this.wsProvider.connect();
+    }
   }
 
   private tryRestoreP2P(): void {

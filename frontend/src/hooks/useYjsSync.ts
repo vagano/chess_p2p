@@ -19,13 +19,17 @@ interface UseYjsSyncReturn {
   isP2P: boolean;
   syncWithServer: () => Promise<void>;
   peerCount: number;
+  connLog: string[];
 }
+
+const MAX_LOG = 30;
 
 export function useYjsSync({ roomId }: UseYjsSyncOptions): UseYjsSyncReturn {
   const docRef = useRef<Y.Doc | null>(null);
   const managerRef = useRef<ConnectionManager | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('DISCONNECTED');
   const [peerCount, setPeerCount] = useState(0);
+  const [connLog, setConnLog] = useState<string[]>([]);
 
   // Initialize doc once
   if (!docRef.current) {
@@ -49,6 +53,7 @@ export function useYjsSync({ roomId }: UseYjsSyncOptions): UseYjsSyncReturn {
       wsServerUrl: config.wsServerUrl,
       onStateChange: (state) => setConnectionState(state),
       onPeerCountChange: (count) => setPeerCount(count),
+      onLog: (entry) => setConnLog((prev) => [...prev.slice(-(MAX_LOG - 1)), entry]),
     };
 
     const manager = new ConnectionManager(options);
@@ -77,5 +82,6 @@ export function useYjsSync({ roomId }: UseYjsSyncOptions): UseYjsSyncReturn {
     isP2P: connectionState === 'P2P_CONNECTED',
     syncWithServer,
     peerCount,
+    connLog,
   };
 }

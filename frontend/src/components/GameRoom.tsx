@@ -104,7 +104,7 @@ export function GameRoom() {
   // Persist roomId so TMA can restore after WebView reload
   persistRoom(roomId);
 
-  const { doc, connectionState, isP2P, syncWithServer, peerCount } =
+  const { doc, connectionState, isP2P, syncWithServer, peerCount, connLog } =
     useYjsSync({ roomId });
 
   const [playerId] = useState(() => {
@@ -335,6 +335,21 @@ export function GameRoom() {
                 <div>WS /ws: <b style={{ color: diag.ws === 'OPEN' ? '#66bb6a' : '#ef5350' }}>{diag.ws}</b></div>
                 <div>SIG /signaling: <b style={{ color: diag.sig === 'OPEN' ? '#66bb6a' : '#ef5350' }}>{diag.sig}</b></div>
                 {diag.err && <div>err: {diag.err}</div>}
+              </div>
+            )}
+            {connLog.length > 0 && (
+              <div style={{
+                marginTop: '4px',
+                maxHeight: '120px',
+                overflowY: 'auto',
+                borderTop: '1px solid rgba(255,255,255,0.1)',
+                paddingTop: '4px',
+              }}>
+                {connLog.map((line, i) => (
+                  <div key={i} style={{
+                    color: line.includes('ERROR') || line.includes('CLOSE') ? '#ef5350' : 'inherit',
+                  }}>{line}</div>
+                ))}
               </div>
             )}
           </div>
