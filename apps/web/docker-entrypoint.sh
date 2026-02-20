@@ -16,5 +16,6 @@ window.__CONFIG__ = {
 console.log("[config.js] Web runtime config loaded:", window.__CONFIG__);
 EOF
 
+mkdir -p /srv/web
 cp -a /dist/* /srv/web/
 echo "[init] Copied web build to /srv/web with CONNECTION_MODE=${CONNECTION_MODE}"

@@ -17,5 +17,6 @@ window.__CONFIG__ = {
 console.log("[config.js] TMA runtime config loaded:", window.__CONFIG__);
 EOF
 
+mkdir -p /srv/tma
 cp -a /dist/* /srv/tma/
 echo "[init] Copied TMA build to /srv/tma"
