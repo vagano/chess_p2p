@@ -1,6 +1,6 @@
 {$DOMAIN} {
 	# ── CRDT Server: y-websocket (hocuspocus) ──
-	handle /ws/* {
+	handle_path /ws/* {
 		reverse_proxy crdt-server:3000 {
 			flush_interval -1
 			transport http {
@@ -33,8 +33,7 @@
 	}
 
 	# ── TMA SPA (Telegram Mini App) ──
-	handle /tma/* {
-		uri strip_prefix /tma
+	handle_path /tma/* {
 		root * /srv/tma
 
 		@configjs path /config.js

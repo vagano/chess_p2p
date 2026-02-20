@@ -27,7 +27,7 @@ function StartParamRedirect() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/tma">
       <Routes>
         <Route path="/" element={<StartParamRedirect />} />
         <Route path="/room/:roomId" element={<GameRoom />} />
