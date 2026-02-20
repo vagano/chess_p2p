@@ -61,6 +61,9 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
   const [kingSquare, setKingSquare] = useState<Square | null>(null);
   const appliedMovesCountRef = useRef(0);
 
+  const [optimisticFen, setOptimisticFen] = useState<string | null>(null);
+  const [optimisticLastMove, setOptimisticLastMove] = useState<{ from: Square; to: Square } | null>(null);
+
   const syncChessState = useCallback(() => {
     const chess = chessRef.current;
     setPosition(chess.fen());
@@ -95,8 +98,10 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
       if (remoteMoves.length !== appliedMovesCountRef.current) {
         const applied = replayMoves(chessRef.current, remoteMoves);
         appliedMovesCountRef.current = applied;
-
         syncChessState();
+
+        setOptimisticFen(null);
+        setOptimisticLastMove(null);
 
         if (remoteMoves.length > 0) {
           const lastUci = remoteMoves[Math.min(applied, remoteMoves.length) - 1];
@@ -108,6 +113,11 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
           }
         }
       }
+
+      if (state.moveError && !state.pendingMove) {
+        setOptimisticFen(null);
+        setOptimisticLastMove(null);
+      }
     };
 
     gameMap.observeDeep(observer);
@@ -118,7 +128,6 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
 
   const isPending = !!gameState.pendingMove;
 
-  // Fallback: if pendingMove is not confirmed within timeout, validate locally
   useEffect(() => {
     const pending = gameState.pendingMove;
     if (!pending) return;
@@ -193,12 +202,14 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
 
       if (!move) return false;
 
+      const newFen = chess.fen();
       const uci = `${move.from}${move.to}${move.promotion || ''}`;
 
-      // Undo the local move — server will confirm via moves[] update
       chess.undo();
 
-      // Send pending move request to server
+      setOptimisticFen(newFen);
+      setOptimisticLastMove({ from: move.from as Square, to: move.to as Square });
+
       requestMove(doc, uci, playerColor);
 
       return true;
@@ -225,13 +236,13 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
   return {
     game: chessRef.current,
     gameState,
-    position,
+    position: optimisticFen ?? position,
     isMyTurn,
     isCheck: checkState,
     kingSquare,
     makeMove,
     isGameOver: gameState.status === 'finished',
-    lastMove,
+    lastMove: optimisticLastMove ?? lastMove,
     possibleMoves,
     isPending,
   };
