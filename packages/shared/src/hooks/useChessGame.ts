@@ -5,9 +5,14 @@ import {
   getGameMap,
   readGameState,
   requestMove,
+  confirmMove,
+  rejectMove,
+  setGameFinished,
   INITIAL_FEN,
 } from '../lib/gameState';
 import type { GameState, GameResult } from '../types';
+
+const PENDING_MOVE_TIMEOUT_MS = 5000;
 
 interface UseChessGameOptions {
   doc: Y.Doc;
@@ -112,6 +117,48 @@ export function useChessGame({ doc, playerColor }: UseChessGameOptions): UseChes
   }, [doc, syncChessState]);
 
   const isPending = !!gameState.pendingMove;
+
+  // Fallback: if pendingMove is not confirmed within timeout, validate locally
+  useEffect(() => {
+    const pending = gameState.pendingMove;
+    if (!pending) return;
+
+    const timer = setTimeout(() => {
+      const current = readGameState(doc);
+      if (!current.pendingMove || current.pendingMove.at !== pending.at) return;
+
+      console.warn('[useChessGame] pendingMove timeout — applying client-side fallback');
+      const chess = new Chess();
+      const moves = current.moves || [];
+      for (const uci of moves) {
+        try { chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] || undefined }); }
+        catch { break; }
+      }
+
+      const from = pending.uci.slice(0, 2);
+      const to = pending.uci.slice(2, 4);
+      const promo = pending.uci[4] || undefined;
+      try {
+        const result = chess.move({ from, to, promotion: promo });
+        if (result) {
+          confirmMove(doc, chess.fen(), chess.pgn(), pending.uci);
+          if (chess.isGameOver()) {
+            let gameResult: GameResult = '1/2-1/2';
+            if (chess.isCheckmate()) {
+              gameResult = chess.turn() === 'w' ? '0-1' : '1-0';
+            }
+            setGameFinished(doc, gameResult);
+          }
+        } else {
+          rejectMove(doc, 'Invalid move (client fallback)');
+        }
+      } catch {
+        rejectMove(doc, 'Invalid move (client fallback)');
+      }
+    }, PENDING_MOVE_TIMEOUT_MS);
+
+    return () => clearTimeout(timer);
+  }, [doc, gameState.pendingMove]);
 
   const isMyTurn = useMemo(() => {
     if (!playerColor || gameState.status !== 'playing') return false;

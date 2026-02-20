@@ -265,26 +265,8 @@ export class ConnectionManager {
         if (event.status === 'connected') {
           if (this.state === 'WS_CONNECTING') this.setState('WS_CONNECTED');
         } else if (event.status === 'disconnected') {
-          if (
-            this.state === 'WS_FALLBACK' ||
-            this.state === 'WS_CONNECTED'
-          ) {
+          if (this.state === 'WS_CONNECTED') {
             this.setState('RECONNECTING');
-            setTimeout(() => {
-              if (!this.destroyed && this.state === 'RECONNECTING' && this.wsProvider) {
-                this.log('WS reconnecting...');
-                this.wsProvider.connect();
-              }
-            }, 2000);
-          }
-          // In hybrid mode, reconnect WS silently even when P2P is primary
-          if (this.mode === 'hybrid' && this.state === 'P2P_CONNECTED' && this.wsProvider) {
-            this.log('WS lost while P2P active, reconnecting WS for validation...');
-            setTimeout(() => {
-              if (!this.destroyed && this.wsProvider) {
-                this.wsProvider.connect();
-              }
-            }, 2000);
           }
         }
       });

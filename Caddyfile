@@ -32,34 +32,40 @@
 		reverse_proxy backend:8080
 	}
 
+	# Normalize /tma → /tma/ without external redirect (Telegram WebView issue)
+	@tma_exact path /tma
+	rewrite @tma_exact /tma/
+
 	# ── TMA SPA (Telegram Mini App) ──
 	handle_path /tma/* {
 		root * /srv/tma
 
+		@static {
+			path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
+			not path /config.js
+		}
+		header @static Cache-Control "public, max-age=31536000, immutable"
+
 		@configjs path /config.js
 		header @configjs Cache-Control "no-store, no-cache, must-revalidate"
-
-		@static path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
-		header @static Cache-Control "public, max-age=31536000, immutable"
 
 		try_files {path} /index.html
 		file_server
 		encode gzip
 	}
 
-	handle /tma {
-		redir /tma/ permanent
-	}
-
 	# ── Web SPA (everything else) ──
 	handle {
 		root * /srv/web
 
-		@configjs path /config.js
-		header @configjs Cache-Control "no-store, no-cache, must-revalidate"
+		@static_web {
+			path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
+			not path /config.js
+		}
+		header @static_web Cache-Control "public, max-age=31536000, immutable"
 
-		@static path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
-		header @static Cache-Control "public, max-age=31536000, immutable"
+		@configjs_web path /config.js
+		header @configjs_web Cache-Control "no-store, no-cache, must-revalidate"
 
 		try_files {path} /index.html
 		file_server

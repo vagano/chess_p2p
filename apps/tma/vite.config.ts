@@ -7,7 +7,11 @@ export default defineConfig({
   server: {
     port: 5174,
     proxy: {
-      '/ws': { target: 'http://localhost:3000', ws: true },
+      '/ws': {
+        target: 'http://localhost:3000',
+        ws: true,
+        rewrite: (path) => path.replace(/^\/ws/, ''),
+      },
       '/api': { target: 'http://localhost:8080' },
     },
   },

@@ -6,7 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/ws': { target: 'http://localhost:3000', ws: true },
+      '/ws': {
+        target: 'http://localhost:3000',
+        ws: true,
+        rewrite: (path) => path.replace(/^\/ws/, ''),
+      },
       '/signaling': { target: 'http://localhost:8080', ws: true },
       '/api': { target: 'http://localhost:8080' },
     },

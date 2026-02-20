@@ -7,6 +7,7 @@ const port = parseInt(process.env.PORT || '3000', 10);
 
 const server = Server.configure({
   port,
+  debounce: 0,
   async onChange(data) {
     await onChange(data);
   },
