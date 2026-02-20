@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	ycrdt "github.com/skyterra/y-crdt"
 	"golang.org/x/time/rate"
 
 	"github.com/ruchess/p2p_poc/backend/internal/room"
@@ -16,30 +15,26 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-	ReadBufferSize:  4096,
+	CheckOrigin:    func(r *http.Request) bool { return true },
+	ReadBufferSize: 4096,
 	WriteBufferSize: 4096,
 }
 
-// Handler holds dependencies for WebSocket endpoints.
 type Handler struct {
 	RoomManager      *room.Manager
-	Store            *storage.PostgresStore // may be nil in dev mode
-	OnUpdate         func(roomID uuid.UUID, doc *ycrdt.Doc)
+	Store            *storage.PostgresStore
+	OnUpdate         func(roomID uuid.UUID, rawMsg []byte)
 	WSRateLimitMPS   float64
 	WSRateLimitBurst int
 	RateLimitEnabled bool
 }
 
-// HandleYjsWS handles the y-websocket protocol for a room.
 func (h *Handler) HandleYjsWS(w http.ResponseWriter, r *http.Request) {
 	roomIDStr := r.URL.Query().Get("room")
 	if roomIDStr == "" {
-		// Try path parameter: /ws/{roomId}
-		// Simple extraction from path
 		path := r.URL.Path
 		if len(path) > 4 {
-			roomIDStr = path[4:] // strip "/ws/"
+			roomIDStr = path[4:]
 		}
 	}
 
@@ -53,10 +48,8 @@ func (h *Handler) HandleYjsWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse or generate room UUID
 	roomID, err := uuid.Parse(roomIDStr)
 	if err != nil {
-		// Use a deterministic UUID from the room name
 		roomID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(roomIDStr))
 	}
 
@@ -75,33 +68,14 @@ func (h *Handler) HandleYjsWS(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[WS] Client connected to room %s (total: %d)", roomIDStr, gameRoom.ClientCount())
 
-	// Create game in DB if store is available
 	if h.Store != nil {
 		_, _ = h.Store.CreateGame(r.Context(), roomID)
 	}
 
-	// Send initial sync (sync step 1 + step 2)
-	h.sendInitialSync(client, gameRoom)
+	// Pure relay: no initial sync from server.
+	// Existing clients will sync with the new one via relayed SyncStep1/SyncStep2.
 
-	// Handle messages
 	go h.readMessages(client, gameRoom, roomID)
-}
-
-func (h *Handler) sendInitialSync(client *room.Client, gameRoom *room.Room) {
-	doc := gameRoom.Doc
-
-	// Send sync step 1: our state vector
-	sv := ycrdt.EncodeStateVector(nil, nil, ycrdt.NewUpdateEncoderV1())
-	if sv == nil {
-		sv = []byte{}
-	}
-
-	// Encode full state as update for the client
-	stateUpdate := ycrdt.EncodeStateAsUpdate(doc, nil)
-	if stateUpdate != nil && len(stateUpdate) > 0 {
-		msg := EncodeSyncStep2(stateUpdate)
-		client.SendBinary(msg)
-	}
 }
 
 func (h *Handler) readMessages(client *room.Client, gameRoom *room.Room, roomID uuid.UUID) {
@@ -138,7 +112,12 @@ func (h *Handler) readMessages(client *room.Client, gameRoom *room.Room, roomID 
 			continue
 		}
 
-		h.handleBinaryMessage(client, gameRoom, roomID, data)
+		// Pure relay: forward all messages to other clients in the room.
+		gameRoom.BroadcastUpdate(data, client)
+
+		if h.OnUpdate != nil {
+			h.OnUpdate(roomID, data)
+		}
 	}
 }
 
@@ -149,80 +128,4 @@ func getMaxMessageSize() int {
 		}
 	}
 	return 65536
-}
-
-func (h *Handler) handleBinaryMessage(client *room.Client, gameRoom *room.Room, roomID uuid.UUID, data []byte) {
-	msgType, subType, payload, err := ParseMessage(data)
-	if err != nil {
-		log.Printf("[WS] Failed to parse message: %v", err)
-		return
-	}
-
-	switch msgType {
-	case MsgSync:
-		h.handleSyncMessage(client, gameRoom, roomID, subType, payload, data)
-	case MsgAwareness:
-		// Broadcast awareness to other clients
-		gameRoom.BroadcastUpdate(data, client)
-	case MsgQueryAwareness:
-		// Respond with empty awareness for now
-	}
-}
-
-func (h *Handler) handleSyncMessage(client *room.Client, gameRoom *room.Room, roomID uuid.UUID, subType byte, payload []byte, rawMsg []byte) {
-	doc := gameRoom.Doc
-
-	switch subType {
-	case SyncStep1:
-		// Client sends state vector, we respond with diff
-		stateUpdate := ycrdt.EncodeStateAsUpdate(doc, payload)
-		if stateUpdate != nil && len(stateUpdate) > 0 {
-			msg := EncodeSyncStep2(stateUpdate)
-			client.SendBinary(msg)
-		}
-
-		// Also send our state vector so client can send us what we're missing
-		sv := ycrdt.EncodeStateVector(nil, nil, ycrdt.NewUpdateEncoderV1())
-		if sv != nil {
-			msg := EncodeSyncStep1(sv)
-			client.SendBinary(msg)
-		}
-
-	case SyncStep2, SyncUpdate:
-		// Apply the update to our doc
-		if payload != nil && len(payload) > 0 {
-			doc.Transact(func(trans *ycrdt.Transaction) {
-				ycrdt.ApplyUpdate(doc, payload, nil)
-			}, nil)
-
-			// Broadcast to other clients
-			gameRoom.BroadcastUpdate(rawMsg, client)
-
-			// Trigger validation/persistence callback
-			if h.OnUpdate != nil {
-				h.OnUpdate(roomID, doc)
-			}
-
-			// Save snapshot to DB
-			h.saveSnapshot(roomID, doc)
-		}
-	}
-}
-
-func (h *Handler) saveSnapshot(roomID uuid.UUID, doc *ycrdt.Doc) {
-	if h.Store == nil {
-		return
-	}
-
-	snapshot := ycrdt.EncodeStateAsUpdate(doc, nil)
-	sv := ycrdt.EncodeStateVector(nil, nil, ycrdt.NewUpdateEncoderV1())
-
-	if snapshot != nil {
-		go func() {
-			err := h.Store.SaveSnapshot(nil, roomID, snapshot, sv)
-			if err != nil {
-				log.Printf("[WS] Failed to save snapshot: %v", err)
-			}
-		}()
-	}
 }

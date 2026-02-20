@@ -13,12 +13,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	ycrdt "github.com/skyterra/y-crdt"
 
 	"github.com/ruchess/p2p_poc/backend/internal/analysis"
 	"github.com/ruchess/p2p_poc/backend/internal/auth"
 	"github.com/ruchess/p2p_poc/backend/internal/bot"
-	chessvalidator "github.com/ruchess/p2p_poc/backend/internal/chess"
 	"github.com/ruchess/p2p_poc/backend/internal/middleware"
 	"github.com/ruchess/p2p_poc/backend/internal/room"
 	"github.com/ruchess/p2p_poc/backend/internal/signaling"
@@ -54,9 +52,6 @@ func main() {
 		defer store.Close()
 	}
 
-	// Initialize chess validator
-	validator := chessvalidator.NewValidator()
-
 	// Initialize Stockfish analyzer (optional)
 	var analyzer *analysis.Analyzer
 	sfAnalyzer, err := analysis.NewAnalyzer(stockfishPath, store)
@@ -71,13 +66,10 @@ func main() {
 	// Initialize room manager
 	roomManager := room.NewManager()
 
-	// WebSocket handler with validation callback
+	// WebSocket handler — pure relay mode
 	wsHandler := &ws.Handler{
 		RoomManager: roomManager,
 		Store:       store,
-		OnUpdate: func(roomID uuid.UUID, doc *ycrdt.Doc) {
-			handleGameUpdate(roomID, doc, validator, store, analyzer)
-		},
 	}
 
 	// Signaling handler
@@ -173,117 +165,6 @@ func main() {
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("[Server] Fatal: %v", err)
 	}
-}
-
-func handleGameUpdate(roomID uuid.UUID, doc *ycrdt.Doc, validator *chessvalidator.Validator, store *storage.PostgresStore, analyzer *analysis.Analyzer) {
-	// Extract game state from Yjs document
-	gameMapRaw := doc.GetMap("game")
-	if gameMapRaw == nil {
-		return
-	}
-	gameMap, ok := gameMapRaw.(*ycrdt.YMap)
-	if !ok {
-		return
-	}
-
-	mapData := gameMap.ToJson()
-	if mapData == nil {
-		return
-	}
-
-	dataMap, ok := mapData.(map[string]interface{})
-	if !ok {
-		return
-	}
-
-	fen, _ := dataMap["fen"].(string)
-	pgn, _ := dataMap["pgn"].(string)
-	status, _ := dataMap["status"].(string)
-	result, _ := dataMap["result"].(string)
-
-	// Extract moves
-	var moves []string
-	if movesRaw, ok := dataMap["moves"]; ok {
-		if movesArr, ok := movesRaw.([]interface{}); ok {
-			for _, m := range movesArr {
-				if s, ok := m.(string); ok {
-					moves = append(moves, s)
-				}
-			}
-		}
-	}
-
-	// Validate moves if we have them
-	if len(moves) > 0 {
-		validFEN, err := validator.ValidateMoves(moves)
-		if err != nil {
-			log.Printf("[Validation] Invalid moves in room %s: %v — rolling back last move", roomID, err)
-
-			// CRDT rollback: remove the invalid last move and restore valid state
-			doc.Transact(func(trans *ycrdt.Transaction) {
-				if len(moves) > 1 {
-					validMoves := moves[:len(moves)-1]
-					rollbackFEN, rollbackErr := validator.ValidateMoves(validMoves)
-					if rollbackErr == nil {
-						gameMap.Set("moves", toInterfaceSlice(validMoves))
-						gameMap.Set("fen", rollbackFEN)
-						log.Printf("[Validation] Rolled back to %d moves in room %s", len(validMoves), roomID)
-					}
-				} else {
-					gameMap.Set("moves", []interface{}{})
-					gameMap.Set("fen", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
-					log.Printf("[Validation] Rolled back to initial position in room %s", roomID)
-				}
-			}, nil)
-			return
-		}
-
-		// Cross-check FEN — correct via CRDT update
-		if validFEN != fen && fen != "" {
-			log.Printf("[Validation] FEN mismatch in room %s: expected %s, got %s — correcting", roomID, validFEN, fen)
-			doc.Transact(func(trans *ycrdt.Transaction) {
-				gameMap.Set("fen", validFEN)
-			}, nil)
-		}
-	}
-
-	// Persist to database
-	if store != nil {
-		gameStatus := storage.GameStatus(status)
-		gameResult := storage.GameResult(result)
-		if err := store.UpdateGameState(context.Background(), roomID, fen, pgn, gameStatus, gameResult); err != nil {
-			log.Printf("[Storage] Failed to update game state: %v", err)
-		}
-	}
-
-	// Trigger analysis on game completion
-	if status == "finished" && analyzer != nil {
-		// Collect FENs for analysis
-		fens := collectFENsFromMoves(moves)
-		if len(fens) > 0 {
-			analyzer.AnalyzeGameAsync(roomID, fens, 20)
-		}
-	}
-}
-
-func collectFENsFromMoves(moves []string) []string {
-	if len(moves) == 0 {
-		return nil
-	}
-
-	validator := chessvalidator.NewValidator()
-	var fens []string
-
-	// Replay moves and collect FENs
-	for i := 1; i <= len(moves); i++ {
-		fen, err := validator.ValidateMoves(moves[:i])
-		if err != nil {
-			break
-		}
-		fens = append(fens, fen)
-	}
-
-	return fens
 }
 
 func handleRoomAPI(store *storage.PostgresStore) http.HandlerFunc {
@@ -477,10 +358,3 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-func toInterfaceSlice(ss []string) []interface{} {
-	result := make([]interface{}, len(ss))
-	for i, s := range ss {
-		result[i] = s
-	}
-	return result
-}
