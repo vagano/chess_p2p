@@ -15,14 +15,12 @@ import (
 
 // RateLimitConfig holds configurable rate limit parameters.
 type RateLimitConfig struct {
-	Enabled        bool
-	EvaluateRPS    float64
-	EvaluateBurst  int
-	APIRPM         float64
-	APIBurst       int
-	WSMessagesPS   float64
-	WSBurst        int
-	TrustProxy     bool
+	Enabled       bool
+	EvaluateRPS   float64
+	EvaluateBurst int
+	APIRPM        float64
+	APIBurst      int
+	TrustProxy    bool
 }
 
 // LoadRateLimitConfig reads rate limit configuration from environment variables.
@@ -33,8 +31,6 @@ func LoadRateLimitConfig() RateLimitConfig {
 		EvaluateBurst: envInt("RATE_LIMIT_EVALUATE_BURST", 5),
 		APIRPM:        envFloat("RATE_LIMIT_API_RPM", 60),
 		APIBurst:      envInt("RATE_LIMIT_API_BURST", 10),
-		WSMessagesPS:  envFloat("RATE_LIMIT_WS_MPS", 10),
-		WSBurst:       envInt("RATE_LIMIT_WS_BURST", 20),
 		TrustProxy:    envBool("TRUST_PROXY", false),
 	}
 }
@@ -123,26 +119,6 @@ func (rl *RateLimiter) Middleware(next http.Handler, trustProxy bool) http.Handl
 // NewRateLimitForRPM creates a limiter configured in requests-per-minute.
 func NewRateLimitForRPM(rpm float64, burst int, enabled bool) *RateLimiter {
 	return NewRateLimiter(rpm/60.0, burst, enabled)
-}
-
-// WSRateLimiter provides per-connection WebSocket message rate limiting.
-type WSRateLimiter struct {
-	limiter *rate.Limiter
-	enabled bool
-}
-
-func NewWSRateLimiter(mps float64, burst int, enabled bool) *WSRateLimiter {
-	return &WSRateLimiter{
-		limiter: rate.NewLimiter(rate.Limit(mps), burst),
-		enabled: enabled,
-	}
-}
-
-func (wrl *WSRateLimiter) Allow() bool {
-	if !wrl.enabled {
-		return true
-	}
-	return wrl.limiter.Allow()
 }
 
 // clientIP extracts the client IP address, respecting X-Forwarded-For / X-Real-IP when behind a trusted proxy.

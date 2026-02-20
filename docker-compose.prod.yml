@@ -18,7 +18,7 @@ services:
     networks:
       - internal
 
-  # ── Go Backend ───────────────────────────────────────────────
+  # ── Go Backend (API, signaling, bot) ────────────────────────
   backend:
     build: ./backend
     container_name: p2p_chess_backend
@@ -26,52 +26,77 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-p2p_chess}?sslmode=disable"
-      STOCKFISH_PATH: "/usr/games/stockfish"
+      STOCKFISH_WORKER_URL: "http://stockfish-worker:9000"
       FRONTEND_URL: "https://${DOMAIN:?Set DOMAIN in .env}"
 
-      # ── Telegram ──
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
-      TELEGRAM_WEBAPP_URL: "https://${DOMAIN}"
+      TELEGRAM_WEBAPP_URL: "https://${DOMAIN}/tma"
       TELEGRAM_WEBHOOK_URL: "https://${DOMAIN}/bot/webhook"
       SKIP_TG_AUTH: "false"
 
-      # ── CORS ──
       CORS_ORIGINS: "https://${DOMAIN}"
 
-      # ── Rate Limiting ──
       RATE_LIMIT_ENABLED: "${RATE_LIMIT_ENABLED:-true}"
       RATE_LIMIT_EVALUATE_RPS: "${RATE_LIMIT_EVALUATE_RPS:-2}"
       RATE_LIMIT_EVALUATE_BURST: "${RATE_LIMIT_EVALUATE_BURST:-5}"
       RATE_LIMIT_API_RPM: "${RATE_LIMIT_API_RPM:-60}"
       RATE_LIMIT_API_BURST: "${RATE_LIMIT_API_BURST:-10}"
-      RATE_LIMIT_WS_MPS: "${RATE_LIMIT_WS_MPS:-10}"
-      RATE_LIMIT_WS_BURST: "${RATE_LIMIT_WS_BURST:-20}"
       TRUST_PROXY: "true"
-
-      # ── WebSocket ──
-      WS_MAX_MESSAGE_SIZE: "${WS_MAX_MESSAGE_SIZE:-65536}"
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - internal
 
-  # ── Frontend build (init container) ─────────────────────────
-  # Builds React SPA, generates config.js, copies to shared volume.
-  # Runs once and exits.
-  frontend-init:
+  # ── CRDT Server (hocuspocus) ────────────────────────────────
+  crdt-server:
+    build: ./services/crdt-server
+    container_name: p2p_chess_crdt
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-p2p_chess}?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - internal
+
+  # ── Stockfish Worker (Go) ───────────────────────────────────
+  stockfish-worker:
+    build: ./services/stockfish-worker
+    container_name: p2p_chess_stockfish
+    restart: unless-stopped
+    environment:
+      PORT: "9000"
+      STOCKFISH_PATH: "/usr/games/stockfish"
+    networks:
+      - internal
+
+  # ── Web Frontend (init container) ──────────────────────────
+  web-init:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-    container_name: p2p_chess_frontend_init
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: p2p_chess_web_init
     environment:
       CONNECTION_MODE: "hybrid"
+    volumes:
+      - frontend_dist:/srv
+
+  # ── TMA Frontend (init container) ──────────────────────────
+  tma-init:
+    build:
+      context: .
+      dockerfile: apps/tma/Dockerfile
+    container_name: p2p_chess_tma_init
+    environment:
       TG_BOT_USERNAME: ${TG_BOT_USERNAME:-}
       TG_APP_NAME: ${TG_APP_NAME:-}
     volumes:
       - frontend_dist:/srv
 
-  # ── Caddy (TLS + static files + reverse proxy) ─────────────
+  # ── Caddy (TLS + static + reverse proxy) ───────────────────
   caddy:
     image: caddy:2-alpine
     container_name: p2p_chess_caddy
@@ -88,9 +113,13 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      frontend-init:
+      web-init:
+        condition: service_completed_successfully
+      tma-init:
         condition: service_completed_successfully
       backend:
+        condition: service_started
+      crdt-server:
         condition: service_started
     networks:
       - internal

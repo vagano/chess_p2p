@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.turbo
+backend/server
+services/stockfish-worker/worker

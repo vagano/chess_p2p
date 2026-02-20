@@ -18,10 +18,8 @@ import (
 	"github.com/ruchess/p2p_poc/backend/internal/auth"
 	"github.com/ruchess/p2p_poc/backend/internal/bot"
 	"github.com/ruchess/p2p_poc/backend/internal/middleware"
-	"github.com/ruchess/p2p_poc/backend/internal/room"
 	"github.com/ruchess/p2p_poc/backend/internal/signaling"
 	"github.com/ruchess/p2p_poc/backend/internal/storage"
-	"github.com/ruchess/p2p_poc/backend/internal/ws"
 )
 
 func main() {
@@ -30,7 +28,7 @@ func main() {
 	// Configuration from env
 	port := getEnv("PORT", "8080")
 	dbURL := getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/p2p_chess?sslmode=disable")
-	stockfishPath := getEnv("STOCKFISH_PATH", "stockfish")
+	stockfishWorkerURL := getEnv("STOCKFISH_WORKER_URL", "http://stockfish-worker:9000")
 	frontendURL := getEnv("FRONTEND_URL", "http://localhost:5173")
 	tgBotToken := getEnv("TELEGRAM_BOT_TOKEN", "")
 	skipTgAuth := getEnv("SKIP_TG_AUTH", "true") == "true"
@@ -52,24 +50,12 @@ func main() {
 		defer store.Close()
 	}
 
-	// Initialize Stockfish analyzer (optional)
-	var analyzer *analysis.Analyzer
-	sfAnalyzer, err := analysis.NewAnalyzer(stockfishPath, store)
-	if err != nil {
-		log.Printf("[WARN] Stockfish not available: %v (running without analysis)", err)
+	// Initialize Stockfish analysis client (calls external worker)
+	analysisClient := analysis.NewClient(stockfishWorkerURL)
+	if analysisClient.IsAvailable() {
+		log.Printf("[Stockfish] Worker available at %s", stockfishWorkerURL)
 	} else {
-		analyzer = sfAnalyzer
-		defer analyzer.Close()
-		log.Println("[Stockfish] Engine ready")
-	}
-
-	// Initialize room manager
-	roomManager := room.NewManager()
-
-	// WebSocket handler — pure relay mode
-	wsHandler := &ws.Handler{
-		RoomManager: roomManager,
-		Store:       store,
+		log.Printf("[WARN] Stockfish worker not available at %s (analysis may fail)", stockfishWorkerURL)
 	}
 
 	// Signaling handler
@@ -90,22 +76,14 @@ func main() {
 	evalLimiter := middleware.NewRateLimiter(rlConf.EvaluateRPS, rlConf.EvaluateBurst, rlConf.Enabled)
 	apiLimiter := middleware.NewRateLimitForRPM(rlConf.APIRPM, rlConf.APIBurst, rlConf.Enabled)
 	if rlConf.Enabled {
-		log.Printf("[RateLimit] ENABLED (eval: %.1f rps burst %d, api: %.0f rpm burst %d, ws: %.0f mps burst %d)",
-			rlConf.EvaluateRPS, rlConf.EvaluateBurst, rlConf.APIRPM, rlConf.APIBurst, rlConf.WSMessagesPS, rlConf.WSBurst)
+		log.Printf("[RateLimit] ENABLED (eval: %.1f rps burst %d, api: %.0f rpm burst %d)",
+			rlConf.EvaluateRPS, rlConf.EvaluateBurst, rlConf.APIRPM, rlConf.APIBurst)
 	} else {
 		log.Println("[RateLimit] DISABLED")
 	}
 
-	// Store WS rate limit config in the handler for per-connection limiting
-	wsHandler.WSRateLimitMPS = rlConf.WSMessagesPS
-	wsHandler.WSRateLimitBurst = rlConf.WSBurst
-	wsHandler.RateLimitEnabled = rlConf.Enabled
-
 	// HTTP routes
 	mux := http.NewServeMux()
-
-	// y-websocket endpoint (public — CRDT sync is self-validating)
-	mux.Handle("/ws/", http.HandlerFunc(wsHandler.HandleYjsWS))
 
 	// WebRTC signaling endpoint (public — only relays SDP/ICE)
 	mux.Handle("/signaling", http.HandlerFunc(sigHandler.HandleSignaling))
@@ -113,16 +91,15 @@ func main() {
 	// REST API (protected + rate limited)
 	mux.Handle("/api/room/", apiLimiter.Middleware(tgAuth.Middleware(http.HandlerFunc(handleRoomAPI(store))), rlConf.TrustProxy))
 	mux.Handle("/api/game/", apiLimiter.Middleware(tgAuth.Middleware(http.HandlerFunc(handleGameAPI(store))), rlConf.TrustProxy))
-	mux.Handle("/api/evaluate", evalLimiter.Middleware(tgAuth.Middleware(http.HandlerFunc(handleEvaluateAPI(analyzer))), rlConf.TrustProxy))
+	mux.Handle("/api/evaluate", evalLimiter.Middleware(tgAuth.Middleware(http.HandlerFunc(handleEvaluateAPI(analysisClient))), rlConf.TrustProxy))
 
 	// Health check (public)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":    "ok",
-			"rooms":     roomManager.RoomCount(),
 			"db":        store != nil,
-			"stockfish": analyzer != nil,
+			"stockfish": analysisClient.IsAvailable(),
 		})
 	})
 
@@ -272,16 +249,11 @@ func split(s string, sep byte) []string {
 	return result
 }
 
-// handleEvaluateAPI — quick Stockfish evaluation for a single position.
+// handleEvaluateAPI — quick Stockfish evaluation for a single position via external worker.
 // GET /api/evaluate?fen=<FEN>&depth=<depth>
-func handleEvaluateAPI(analyzer *analysis.Analyzer) http.HandlerFunc {
+func handleEvaluateAPI(client *analysis.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-
-		if analyzer == nil {
-			http.Error(w, `{"error":"stockfish not available"}`, http.StatusServiceUnavailable)
-			return
-		}
 
 		fen := r.URL.Query().Get("fen")
 		if fen == "" {
@@ -294,7 +266,6 @@ func handleEvaluateAPI(analyzer *analysis.Analyzer) http.HandlerFunc {
 			return
 		}
 
-		// Use low depth for quick response (default 12, max 18)
 		depth := 12
 		if d := r.URL.Query().Get("depth"); d != "" {
 			if _, err := fmt.Sscanf(d, "%d", &depth); err != nil || depth < 1 {
@@ -305,7 +276,7 @@ func handleEvaluateAPI(analyzer *analysis.Analyzer) http.HandlerFunc {
 			}
 		}
 
-		result, err := analyzer.AnalyzePosition(fen, depth)
+		result, err := client.AnalyzePosition(fen, depth)
 		if err != nil {
 			http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusInternalServerError)
 			return
@@ -357,4 +328,3 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
-

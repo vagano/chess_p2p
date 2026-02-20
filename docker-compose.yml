@@ -17,7 +17,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Go Backend ───────────────────────────────────────────────
+  # ── Go Backend (API, signaling, bot) ────────────────────────
   backend:
     build: ./backend
     container_name: p2p_chess_backend
@@ -26,33 +26,34 @@ services:
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://postgres:postgres@postgres:5432/p2p_chess?sslmode=disable"
-      STOCKFISH_PATH: "/usr/games/stockfish"
-      FRONTEND_URL: "http://localhost:3000"
+      STOCKFISH_WORKER_URL: "http://stockfish-worker:9000"
+      FRONTEND_URL: "http://localhost:5173"
     depends_on:
       postgres:
         condition: service_healthy
 
-  # ── Frontend (Hybrid mode — default) ─────────────────────────
-  # P2P primary, WebSocket fallback.
-  # Change CONNECTION_MODE to switch: "p2p", "websocket", "hybrid"
-  frontend:
-    build: ./frontend
-    container_name: p2p_chess_frontend
+  # ── CRDT Server (hocuspocus) ────────────────────────────────
+  crdt-server:
+    build: ./services/crdt-server
+    container_name: p2p_chess_crdt
     ports:
-      - "3000:80"
+      - "3000:3000"
     environment:
-      # ── Connection mode: "p2p" | "websocket" | "hybrid" ──
-      CONNECTION_MODE: "hybrid"
-      # ── Telegram (set for TMA invite links) ──
-      TG_BOT_USERNAME: "${TG_BOT_USERNAME:-}"
-      TG_APP_NAME: "${TG_APP_NAME:-}"
-      # URLs are auto-detected from browser location when empty.
-      # Set explicitly only for non-standard deployments:
-      # WS_SERVER_URL: "ws://localhost:3000"
-      # SIGNALING_SERVERS: '["ws://localhost:3000/signaling"]'
-      # API_BASE_URL: "http://localhost:3000"
+      PORT: "3000"
+      DATABASE_URL: "postgres://postgres:postgres@postgres:5432/p2p_chess?sslmode=disable"
     depends_on:
-      - backend
+      postgres:
+        condition: service_healthy
+
+  # ── Stockfish Worker ────────────────────────────────────────
+  stockfish-worker:
+    build: ./services/stockfish-worker
+    container_name: p2p_chess_stockfish
+    ports:
+      - "9000:9000"
+    environment:
+      PORT: "9000"
+      STOCKFISH_PATH: "/usr/games/stockfish"
 
 volumes:
   pgdata:

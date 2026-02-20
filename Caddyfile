@@ -1,7 +1,7 @@
 {$DOMAIN} {
-	# ── Backend: y-websocket (CRDT sync) ──
+	# ── CRDT Server: y-websocket (hocuspocus) ──
 	handle /ws/* {
-		reverse_proxy backend:8080 {
+		reverse_proxy crdt-server:3000 {
 			flush_interval -1
 			transport http {
 				versions 1.1
@@ -32,9 +32,29 @@
 		reverse_proxy backend:8080
 	}
 
-	# ── Frontend SPA (everything else) ──
+	# ── TMA SPA (Telegram Mini App) ──
+	handle /tma/* {
+		uri strip_prefix /tma
+		root * /srv/tma
+
+		@configjs path /config.js
+		header @configjs Cache-Control "no-store, no-cache, must-revalidate"
+
+		@static path *.js *.css *.png *.jpg *.jpeg *.gif *.ico *.svg *.woff *.woff2 *.ttf *.eot
+		header @static Cache-Control "public, max-age=31536000, immutable"
+
+		try_files {path} /index.html
+		file_server
+		encode gzip
+	}
+
+	handle /tma {
+		redir /tma/ permanent
+	}
+
+	# ── Web SPA (everything else) ──
 	handle {
-		root * /srv
+		root * /srv/web
 
 		@configjs path /config.js
 		header @configjs Cache-Control "no-store, no-cache, must-revalidate"
