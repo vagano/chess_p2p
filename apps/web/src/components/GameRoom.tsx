@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   useYjsSync,
@@ -17,6 +17,16 @@ import {
 import { config } from '../config';
 import { createWebrtcProvider } from '../webrtcFactory';
 
+function getOrCreatePlayerId(roomId: string): string {
+  const key = `chess_pid_${roomId}`;
+  let id = sessionStorage.getItem(key);
+  if (!id) {
+    id = `web_${roomId.slice(0, 6)}_${Math.random().toString(36).slice(2, 6)}`;
+    sessionStorage.setItem(key, id);
+  }
+  return id;
+}
+
 export default function GameRoom() {
   const { roomId } = useParams<{ roomId: string }>();
   const navigate = useNavigate();
@@ -28,7 +38,7 @@ export default function GameRoom() {
     createWebrtcProvider: config.connectionMode !== 'websocket' ? createWebrtcProvider : undefined,
   });
 
-  const playerId = `web_${(roomId ?? '').slice(0, 6)}_${Math.random().toString(36).slice(2, 6)}`;
+  const playerId = useMemo(() => getOrCreatePlayerId(roomId ?? ''), [roomId]);
   const playerName = 'Player';
 
   useEffect(() => {

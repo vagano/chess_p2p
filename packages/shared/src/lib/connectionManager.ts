@@ -124,41 +124,25 @@ export class ConnectionManager {
   }
 
   syncWithServer(): Promise<void> {
-    if (this.mode === 'websocket') return Promise.resolve();
+    if (this.wsProvider?.wsconnected) return Promise.resolve();
 
     return new Promise((resolve) => {
       if (!this.wsProvider) {
-        this.wsProvider = new WebsocketProvider(
-          this.wsServerUrl,
-          this.roomId,
-          this.doc,
-          { connect: false, params: {}, resyncInterval: 20000 },
-        );
+        this.createWSProvider();
+      } else {
+        this.wsProvider.connect();
       }
 
       const onSync = (synced: boolean) => {
         if (synced) {
           this.wsProvider?.off('sync', onSync);
-          if (this.state === 'P2P_CONNECTED') {
-            setTimeout(() => {
-              this.wsProvider?.disconnect();
-              resolve();
-            }, 500);
-          } else {
-            resolve();
-          }
+          resolve();
         }
       };
 
-      this.wsProvider.on('sync', onSync);
-      this.wsProvider.connect();
+      this.wsProvider!.on('sync', onSync);
 
-      setTimeout(() => {
-        if (this.state === 'P2P_CONNECTED') {
-          this.wsProvider?.disconnect();
-        }
-        resolve();
-      }, 5000);
+      setTimeout(() => resolve(), 5000);
     });
   }
 
@@ -197,7 +181,7 @@ export class ConnectionManager {
       const total = e.webrtcPeers.length + e.bcPeers.length;
       this.log(`peers: webrtc=${e.webrtcPeers.length} bc=${e.bcPeers.length}`);
       this.onPeerCountChange?.(total);
-      if (total > 0 && this.state === 'P2P_CONNECTING') {
+      if (total > 0 && this.state !== 'P2P_CONNECTED') {
         this.onP2PConnected();
       }
     });
@@ -205,7 +189,7 @@ export class ConnectionManager {
     this.webrtcProvider.on('synced', () => {
       if (this.destroyed) return;
       this.log('WebRTC synced');
-      if (this.state === 'P2P_CONNECTING') {
+      if (this.state !== 'P2P_CONNECTED') {
         this.onP2PConnected();
       }
     });
@@ -218,36 +202,26 @@ export class ConnectionManager {
     this.createWSProvider();
   }
 
-  // ─── Mode: Hybrid (P2P primary, WS fallback) ──────────────
+  // ─── Mode: Hybrid (P2P for fast sync, WS always on for server validation) ──
 
   private connectHybrid(): void {
+    this.log(`Hybrid: starting WS (required for server validation)`);
+    this.setState('WS_CONNECTING');
+    this.createWSProvider();
+
     if (!this.webrtcProvider) {
-      this.log('Hybrid mode but no WebrtcProvider, using WS only');
-      this.connectWSOnly();
+      this.log('Hybrid mode but no WebrtcProvider, WS-only');
       return;
     }
 
-    this.setState('P2P_CONNECTING');
     this.log(`WebRTC signaling: ${this.signalingServers.join(', ')}`);
     this.setupP2PListeners();
-
-    this.p2pTimeoutTimer = setTimeout(() => {
-      if (this.state === 'P2P_CONNECTING') {
-        this.log('P2P timeout → WS fallback');
-        this.activateWSFallback();
-      }
-    }, this.p2pTimeout);
   }
 
   private onP2PConnected(): void {
     if (this.p2pTimeoutTimer) {
       clearTimeout(this.p2pTimeoutTimer);
       this.p2pTimeoutTimer = null;
-    }
-
-    if (this.wsProvider) {
-      this.log('P2P restored, disconnecting WS');
-      this.wsProvider.disconnect();
     }
 
     if (this.p2pRetryTimer) {
@@ -260,7 +234,9 @@ export class ConnectionManager {
 
   private activateWSFallback(): void {
     this.setState('WS_FALLBACK');
-    this.createWSProvider();
+    if (!this.wsProvider) {
+      this.createWSProvider();
+    }
 
     this.p2pRetryTimer = setInterval(() => {
       if (this.destroyed) return;
@@ -289,11 +265,23 @@ export class ConnectionManager {
         if (event.status === 'connected') {
           if (this.state === 'WS_CONNECTING') this.setState('WS_CONNECTED');
         } else if (event.status === 'disconnected') {
-          if (this.state === 'WS_FALLBACK' || this.state === 'WS_CONNECTED') {
+          if (
+            this.state === 'WS_FALLBACK' ||
+            this.state === 'WS_CONNECTED'
+          ) {
             this.setState('RECONNECTING');
             setTimeout(() => {
               if (!this.destroyed && this.state === 'RECONNECTING' && this.wsProvider) {
                 this.log('WS reconnecting...');
+                this.wsProvider.connect();
+              }
+            }, 2000);
+          }
+          // In hybrid mode, reconnect WS silently even when P2P is primary
+          if (this.mode === 'hybrid' && this.state === 'P2P_CONNECTED' && this.wsProvider) {
+            this.log('WS lost while P2P active, reconnecting WS for validation...');
+            setTimeout(() => {
+              if (!this.destroyed && this.wsProvider) {
                 this.wsProvider.connect();
               }
             }, 2000);

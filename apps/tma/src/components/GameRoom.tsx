@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   useYjsSync,
@@ -37,7 +37,16 @@ export default function GameRoom() {
   });
 
   const tgUser = getTelegramUser();
-  const playerId = tgUser ? `tg_${tgUser.id}` : `anon_${roomId.slice(0, 6)}`;
+  const playerId = useMemo(() => {
+    if (tgUser) return `tg_${tgUser.id}`;
+    const key = `chess_pid_${roomId}`;
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+      id = `anon_${roomId.slice(0, 6)}_${Math.random().toString(36).slice(2, 6)}`;
+      sessionStorage.setItem(key, id);
+    }
+    return id;
+  }, [roomId, tgUser]);
   const playerName = tgUser ? tgUser.first_name : 'Player';
 
   useEffect(() => {
